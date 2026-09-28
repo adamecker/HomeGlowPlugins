@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Weekly Menu (Keep Sync)</title>
+  <script type="application/json" id="homeglow-manifest">{
+  "manifestVersion": 1,
+  "id": "keep-meal-menu",
+  "name": "Weekly Menu (Keep Sync)",
+  "description": "Weekly dinner menu auto-synced from a Google Keep note. Configure in Admin > Connections > Keep Meal Plan.",
+  "version": "1.0.0",
+  "apiVersion": "v1",
+  "settings": []
+}</script>
+  <link rel="stylesheet" href="/index.css">
+  <style>
+    :root {
+      --bg-color: var(--card-bg, #1a1a1a);
+      --text-main: var(--text, #f0f0f0);
+      --text-muted: var(--text-secondary, #999999);
+      --border-color: var(--card-border, #333333);
+      --accent: var(--accent, #3b82f6);
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: transparent !important;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: var(--text-main);
+      box-sizing: border-box;
+      user-select: none;
+      container-type: inline-size;
+    }
+    .menu-container {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      padding: 10px 14px;
+      box-sizing: border-box;
+      background: var(--bg-color);
+      border-radius: 12px;
+      border: 1px solid var(--border-color);
+      overflow: hidden;
+    }
+    .menu-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+      flex-shrink: 0;
+    }
+    .menu-title {
+      font-size: clamp(0.85rem, 3.5cqw, 1.2rem);
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+    }
+    .refresh-btn {
+      background: transparent;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 6px 10px;
+      font-size: clamp(0.75rem, 3cqw, 1rem);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+    .refresh-btn:hover:not(:disabled) {
+      border-color: var(--accent);
+      color: var(--text-main);
+    }
+    .refresh-btn:disabled {
+      opacity: 0.5;
+      cursor: wait;
+    }
+    .refresh-btn.spinning .refresh-icon {
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .menu-list {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .menu-day {
+      display: flex;
+      flex-direction: column;
+      padding: 6px 0;
+      border-bottom: 1px solid var(--border-color);
+    }
+    .menu-day:last-child {
+      border-bottom: none;
+    }
+    .menu-day.today {
+      background: color-mix(in srgb, var(--accent) 12%, transparent);
+      border-radius: 8px;
+      padding: 6px 8px;
+      margin: 0 -8px;
+    }
+    .day-name {
+      font-size: clamp(0.8rem, 3.2cqw, 1.05rem);
+      font-weight: 800;
+      color: var(--text-main);
+    }
+    .day-schedule {
+      font-size: clamp(0.65rem, 2.6cqw, 0.85rem);
+      color: var(--text-muted);
+      margin-top: 1px;
+    }
+    .day-meal {
+      font-size: clamp(0.9rem, 3.8cqw, 1.25rem);
+      font-weight: 600;
+      color: var(--accent);
+      margin-top: 2px;
+    }
+    .day-meal.empty {
+      color: var(--text-muted);
+      font-weight: 400;
+      font-style: italic;
+    }
+    .menu-footer {
+      flex-shrink: 0;
+      margin-top: 6px;
+      padding-top: 6px;
+      border-top: 1px solid var(--border-color);
+      font-size: clamp(0.65rem, 2.5cqw, 0.8rem);
+      color: var(--text-muted);
+      text-align: center;
+    }
+    .menu-empty {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: clamp(0.85rem, 3.2cqw, 1.1rem);
+      gap: 8px;
+      padding: 20px;
+    }
+    .sync-error {
+      color: #ef4444;
+      font-size: clamp(0.75rem, 2.8cqw, 0.95rem);
+    }
+  </style>
+  <script src="/plugin-sdk/v1.js"></script>
+</head>
+<body>
+  <div class="menu-container">
+    <div class="menu-header">
+      <span class="menu-title">🍽️ Weekly Menu</span>
+      <button class="refresh-btn" id="refresh-btn" title="Sync now">
+        <span class="refresh-icon">↻</span>
+        <span id="refresh-label">Sync</span>
+      </button>
+    </div>
+    <div class="menu-list" id="menu-list"></div>
+    <div class="menu-footer" id="menu-footer"></div>
+  </div>
+
+  <script>
+    const DAY_ORDER = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+    function getTodayName() {
+      return DAY_ORDER[(new Date().getDay() + 6) % 7];
+    }
+
+    function formatSyncTime(iso) {
+      if (!iso) return 'never';
+      const d = new Date(iso);
+      const now = new Date();
+      const diffMin = Math.round((now - d) / 60000);
+      if (diffMin < 1) return 'just now';
+      if (diffMin < 60) return `${diffMin}m ago`;
+      const diffH = Math.round(diffMin / 60);
+      if (diffH < 24) return `${diffH}h ago`;
+      return d.toLocaleDateString();
+    }
+
+    function escapeHtml(s) {
+      return String(s ?? '').replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[c]));
+    }
+
+    async function loadMenu() {
+      const listEl = document.getElementById('menu-list');
+      const footerEl = document.getElementById('menu-footer');
+
+      try {
+        const res = await fetch('/api/menu/keep');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        if (!data.configured) {
+          listEl.innerHTML = `<div class="menu-empty">
+            <div>📋</div>
+            <div>Keep meal sync not configured.<br>Set it up in Admin → Connections → Keep Meal Plan.</div>
+          </div>`;
+          footerEl.textContent = '';
+          return;
+        }
+
+        if (!data.days || data.days.length === 0) {
+          listEl.innerHTML = `<div class="menu-empty">
+            <div>🍽️</div>
+            <div>No meals found. Press Sync to fetch from Keep.</div>
+          </div>`;
+          footerEl.textContent = `Last sync: ${formatSyncTime(data.lastSync)}`;
+          return;
+        }
+
+        const today = getTodayName();
+        // Show starting from today, wrapping around
+        const todayIdx = data.days.findIndex(d => d.day === today);
+        const ordered = todayIdx >= 0
+          ? [...data.days.slice(todayIdx), ...data.days.slice(0, todayIdx)]
+          : data.days;
+
+        listEl.innerHTML = ordered.map(d => `
+          <div class="menu-day ${d.day === today ? 'today' : ''}">
+            <span class="day-name">${escapeHtml(d.day)}${d.day === today ? ' (today)' : ''}</span>
+            ${d.schedule ? `<span class="day-schedule">${escapeHtml(d.schedule)}</span>` : ''}
+            ${d.meal
+              ? `<span class="day-meal">${escapeHtml(d.meal)}</span>`
+              : `<span class="day-meal empty">Not planned yet</span>`}
+          </div>
+        `).join('');
+
+        footerEl.textContent = `Last sync: ${formatSyncTime(data.lastSync)} · Auto-sync every ${data.intervalMinutes || 20} min`;
+      } catch (err) {
+        listEl.innerHTML = `<div class="menu-empty">
+          <div class="sync-error">⚠️ Failed to load menu</div>
+          <div>${escapeHtml(err.message)}</div>
+        </div>`;
+      }
+    }
+
+    async function manualSync() {
+      const btn = document.getElementById('refresh-btn');
+      const label = document.getElementById('refresh-label');
+      btn.disabled = true;
+      btn.classList.add('spinning');
+      label.textContent = 'Syncing…';
+
+      try {
+        const res = await fetch('/api/menu/keep/sync', { method: 'POST' });
+        const data = await res.json();
+        if (!data.ok && !data.skipped) {
+          throw new Error(data.error || 'Sync failed');
+        }
+        await loadMenu();
+      } catch (err) {
+        label.textContent = 'Failed';
+        setTimeout(() => { label.textContent = 'Sync'; }, 2000);
+      } finally {
+        btn.disabled = false;
+        btn.classList.remove('spinning');
+        if (label.textContent === 'Syncing…') label.textContent = 'Sync';
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const p = new URLSearchParams(window.location.search);
+      document.documentElement.setAttribute('data-theme', p.get('theme') || 'dark');
+      if (p.get('transparent') === 'true') {
+        const c = document.querySelector('.menu-container');
+        if (c) { c.style.background = 'transparent'; c.style.border = 'none'; }
+      }
+
+      document.getElementById('refresh-btn').addEventListener('click', manualSync);
+      loadMenu();
+      // Refresh the display every 5 minutes (data syncs server-side on its own schedule)
+      setInterval(loadMenu, 5 * 60 * 1000);
+    });
+  </script>
+</body>
+</html>
