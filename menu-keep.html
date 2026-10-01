@@ -7,8 +7,8 @@
   "manifestVersion": 1,
   "id": "keep-meal-menu",
   "name": "Weekly Menu (Keep Sync)",
-  "description": "Weekly dinner menu auto-synced from a Google Keep note. Configure in Admin > Connections > Keep Meal Plan.",
-  "version": "1.0.0",
+  "description": "Weekly dinner menu, synced nightly from the family's Google Keep meal plan (the MEAL PLAN section of the 'To buy (food)' note).",
+  "version": "1.1.0",
   "apiVersion": "v1",
   "settings": []
 }</script>
@@ -161,9 +161,9 @@
   <div class="menu-container">
     <div class="menu-header">
       <span class="menu-title">🍽️ Weekly Menu</span>
-      <button class="refresh-btn" id="refresh-btn" title="Sync now">
+      <button class="refresh-btn" id="refresh-btn" title="Refresh">
         <span class="refresh-icon">↻</span>
-        <span id="refresh-label">Sync</span>
+        <span id="refresh-label">Refresh</span>
       </button>
     </div>
     <div class="menu-list" id="menu-list"></div>
@@ -200,34 +200,26 @@
       const footerEl = document.getElementById('menu-footer');
 
       try {
-        const res = await fetch('/api/menu/keep');
+        const res = await fetch('/api/settings?keys=WEEKLY_MENU_JSON');
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
+        const menu = data.WEEKLY_MENU_JSON;
 
-        if (!data.configured) {
+        if (!menu || !menu.days || menu.days.length === 0) {
           listEl.innerHTML = `<div class="menu-empty">
-            <div>📋</div>
-            <div>Keep meal sync not configured.<br>Set it up in Admin → Connections → Keep Meal Plan.</div>
+            <div>🍽️</div>
+            <div>No menu synced yet.<br>The nightly sync picks up the Keep meal plan.</div>
           </div>`;
           footerEl.textContent = '';
           return;
         }
 
-        if (!data.days || data.days.length === 0) {
-          listEl.innerHTML = `<div class="menu-empty">
-            <div>🍽️</div>
-            <div>No meals found. Press Sync to fetch from Keep.</div>
-          </div>`;
-          footerEl.textContent = `Last sync: ${formatSyncTime(data.lastSync)}`;
-          return;
-        }
-
         const today = getTodayName();
         // Show starting from today, wrapping around
-        const todayIdx = data.days.findIndex(d => d.day === today);
+        const todayIdx = menu.days.findIndex(d => d.day === today);
         const ordered = todayIdx >= 0
-          ? [...data.days.slice(todayIdx), ...data.days.slice(0, todayIdx)]
-          : data.days;
+          ? [...menu.days.slice(todayIdx), ...menu.days.slice(0, todayIdx)]
+          : menu.days;
 
         listEl.innerHTML = ordered.map(d => `
           <div class="menu-day ${d.day === today ? 'today' : ''}">
@@ -239,7 +231,7 @@
           </div>
         `).join('');
 
-        footerEl.textContent = `Last sync: ${formatSyncTime(data.lastSync)} · Auto-sync every ${data.intervalMinutes || 20} min`;
+        footerEl.textContent = `Last sync: ${formatSyncTime(menu.updatedAt)} · Nightly sync from Keep`;
       } catch (err) {
         listEl.innerHTML = `<div class="menu-empty">
           <div class="sync-error">⚠️ Failed to load menu</div>
@@ -253,22 +245,14 @@
       const label = document.getElementById('refresh-label');
       btn.disabled = true;
       btn.classList.add('spinning');
-      label.textContent = 'Syncing…';
+      label.textContent = 'Refreshing…';
 
       try {
-        const res = await fetch('/api/menu/keep/sync', { method: 'POST' });
-        const data = await res.json();
-        if (!data.ok && !data.skipped) {
-          throw new Error(data.error || 'Sync failed');
-        }
         await loadMenu();
-      } catch (err) {
-        label.textContent = 'Failed';
-        setTimeout(() => { label.textContent = 'Sync'; }, 2000);
       } finally {
         btn.disabled = false;
         btn.classList.remove('spinning');
-        if (label.textContent === 'Syncing…') label.textContent = 'Sync';
+        label.textContent = 'Refresh';
       }
     }
 
@@ -282,7 +266,7 @@
 
       document.getElementById('refresh-btn').addEventListener('click', manualSync);
       loadMenu();
-      // Refresh the display every 5 minutes (data syncs server-side on its own schedule)
+      // Refresh the display every 5 minutes (data syncs nightly via cron job)
       setInterval(loadMenu, 5 * 60 * 1000);
     });
   </script>
