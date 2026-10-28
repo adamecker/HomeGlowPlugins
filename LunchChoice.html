@@ -6,9 +6,12 @@
   <!--
     Lunch Choice — a generic lunch-picker widget for HomeGlow.
 
-    A week view: today highlighted, days ahead shown. Tap a day and each
+    A calendar week view (Monday-Friday by default, weekends optional).
+    Today highlighted when visible, past days locked. Tap a day and each
     person chooses their lunch from parent-managed options. A choice is
     per day, per person, so several people choose independently.
+    A display can also show only some people (a per-display filter stored
+    on the display itself, not in the shared doc) - see LunchChoice.md.
 
     People and options are fully parent-configured: nothing is hardcoded
     and no household data ships in the code. First run starts empty —
@@ -27,7 +30,11 @@
           people: [ { id, name, emoji, color } ],
           options: [ { id, name, emoji, color, imageUrl } ],
           choices: { "YYYY-MM-DD": { "<personId>": "<optionId>" } },
+          showWeekends: false,
           updatedAt: ISO timestamp }
+    showWeekends is household-wide (all displays share it); the per-display
+    people filter lives in this display's localStorage shim only, never in
+    the shared doc. Older docs without showWeekends default to false.
     Choices are local dates (YYYY-MM-DD from local parts, never UTC).
     The widget polls storage (default every 10s, setting `pollSeconds`)
     so choices from another display appear without a reload. Polling
@@ -107,7 +114,7 @@
     .dot { width: 14px; height: 14px; border-radius: 50%; flex: none; }
     .daygrid { display: grid; gap: 0.6rem; grid-template-columns: 1fr; }
     @container (min-width: 560px) { .daygrid { grid-template-columns: 1fr 1fr; } }
-    @container (min-width: 900px) { .daygrid { grid-template-columns: repeat(7, 1fr); } }
+    @container (min-width: 900px) { .daygrid.cols5 { grid-template-columns: repeat(5, 1fr); } .daygrid.cols7 { grid-template-columns: repeat(7, 1fr); } }
     .daycard {
       text-align: left; border-radius: 14px; padding: 0.6rem;
       border: 1px solid var(--border, #ddd); color: inherit;
@@ -129,6 +136,8 @@
     }
     [data-theme="dark"] .mrow { border-bottom-color: rgba(255,255,255,0.12); }
     .mrow .nm { flex: 1; }
+    .mrow .flabel { flex: 1; }
+    .mrow input[type="checkbox"] { width: 22px; height: 22px; flex: none; accent-color: var(--accent, #4a90d9); }
     .mrow .em { font-size: 1.5rem; }
     .mrow .thumb { width: 40px; height: 40px; object-fit: cover; border-radius: 8px; flex: none; }
     .smallbtn {
@@ -207,6 +216,8 @@
       <h2>Lunch options</h2>
       <div id="optionsList"></div>
       <button type="button" class="addbtn" id="addOptionBtn">+ Add option</button>
+      <h2>Week view</h2>
+      <div id="displaySettings"></div>
       <p class="hint">Pictures: an option can show a remote picture URL (see the form). Uploading pictures from inside the widget is not supported yet — emoji and color are the pre-reader-friendly choice for now.</p>
     </div>
 
@@ -262,6 +273,7 @@
   (function () {
     var DOC_KEY = 'data';
     var LS_KEY = 'homeglowLunchChoice.data';
+    var LS_FILTER_KEY = 'homeglowLunchChoice.displayPeople';
     var MAX_DOC_BYTES = 60000; // under the 64 KB server per-key cap
     var COLORS = ['#e57373', '#f06292', '#ba68c8', '#7986cb', '#64b5f6', '#4db6ac', '#81c784', '#dce775', '#ffb74d', '#ff8a65'];
     var FOOD_EMOJI = ['🥪', '🍕', '🍝', '🌮', '🥗', '🍎', '🍌', '🧀', '🥚', '🍗', '🥦', '🍓', '🥞', '🧇', '🥨', '🍩', '🍪', '🥛', '🧃', '🍫'];
@@ -269,7 +281,7 @@
 
     var state = null; // { version:1, people:[], options:[], choices:{}, updatedAt }
     var settings = { pollSeconds: 10 };
-    var viewStart = startOfDay(new Date()); // first day of the shown 7-day window
+    var weekMonday = null; // Monday of the shown calendar week (set after state loads)
     var view = 'week'; // 'week' | 'manage'
     var dialogDateKey = null;
     var dialogPersonId = null;
@@ -299,6 +311,44 @@
     }
     function todayKey() { return dateKey(new Date()); }
     function isPastKey(key) { return key < todayKey(); }
+    function mondayOf(d) {
+      var x = startOfDay(d);
+      return addDays(x, -((x.getDay() + 6) % 7));
+    }
+    function defaultWeekMonday(now) {
+      now = now || new Date();
+      var mon = mondayOf(now);
+      // School lunches are Mon-Fri. On Sat/Sun with weekends hidden there is
+      // nothing pickable this week, so default to next week's Mon-Fri.
+      if (!state.showWeekends && (now.getDay() === 0 || now.getDay() === 6)) return addDays(mon, 7);
+      return mon;
+    }
+    function visibleDays() {
+      var days = [];
+      var count = state.showWeekends ? 7 : 5;
+      for (var i = 0; i < count; i++) days.push(addDays(weekMonday, i));
+      return days;
+    }
+    function todayIsChoosable() {
+      var dow = new Date().getDay();
+      return state.showWeekends || (dow !== 0 && dow !== 6);
+    }
+    function loadFilter() {
+      try {
+        var raw = localStorage.getItem(LS_FILTER_KEY);
+        var arr = raw ? JSON.parse(raw) : [];
+        return Array.isArray(arr) ? arr.filter(function (id) { return typeof id === 'string'; }) : [];
+      } catch (e) { return []; }
+    }
+    function saveFilter(ids) {
+      try { localStorage.setItem(LS_FILTER_KEY, JSON.stringify(ids)); } catch (e) {}
+    }
+    function visiblePeople() {
+      var f = loadFilter();
+      if (!f.length) return state.people;
+      var shown = state.people.filter(function (p) { return f.indexOf(p.id) !== -1; });
+      return shown.length ? shown : state.people;
+    }
     function personById(id) { return (state.people || []).filter(function (p) { return p.id === id; })[0] || null; }
     function optionById(id) { return (state.options || []).filter(function (o) { return o.id === id; })[0] || null; }
     function choiceFor(dateKeyStr, personId) {
@@ -351,7 +401,7 @@
     function defaultState() {
       // First run starts empty: no people, no options, no choices.
       // Seeding example names would look like real household data.
-      return { version: 1, people: [], options: [], choices: {}, updatedAt: nowIso() };
+      return { version: 1, people: [], options: [], choices: {}, showWeekends: false, updatedAt: nowIso() };
     }
     function normalize(doc) {
       if (!doc || typeof doc !== 'object') return defaultState();
@@ -360,6 +410,7 @@
         people: Array.isArray(doc.people) ? doc.people.filter(function (p) { return p && p.id && p.name; }) : [],
         options: Array.isArray(doc.options) ? doc.options.filter(function (o) { return o && o.id && o.name; }) : [],
         choices: (doc.choices && typeof doc.choices === 'object') ? doc.choices : {},
+        showWeekends: doc.showWeekends === true,
         updatedAt: doc.updatedAt || nowIso()
       };
     }
@@ -389,17 +440,19 @@
       return '<span class="em">' + esc(o.emoji || '🍽️') + '</span>';
     }
     function renderWeekLabel() {
-      var end = addDays(viewStart, 6);
-      $('weekLabel').textContent = viewStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) +
-        ' – ' + end.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      var days = visibleDays();
+      var first = days[0];
+      var last = days[days.length - 1];
+      $('weekLabel').textContent = first.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) +
+        ' – ' + last.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
     }
     function renderTodayBox() {
       var box = $('todayBox');
       var tk = todayKey();
-      if (!state.people.length) { box.classList.add('hidden'); return; }
+      if (!state.people.length || !todayIsChoosable()) { box.classList.add('hidden'); return; }
       box.classList.remove('hidden');
       var html = '<h2>Today — ' + esc(fmtDay(new Date())) + '</h2>';
-      state.people.forEach(function (p) {
+      visiblePeople().forEach(function (p) {
         var cid = choiceFor(tk, p.id);
         var o = cid ? optionById(cid) : null;
         html += '<div class="todayrow">' + personLabel(p) + '<span class="choice">' +
@@ -426,9 +479,12 @@
       }
       renderTodayBox();
       var tk = todayKey();
+      var days = visibleDays();
+      var grid0 = $('dayGrid');
+      grid0.className = 'daygrid cols' + days.length;
       var html = '';
-      for (var i = 0; i < 7; i++) {
-        var d = addDays(viewStart, i);
+      for (var i = 0; i < days.length; i++) {
+        var d = days[i];
         var key = dateKey(d);
         var isToday = key === tk;
         var isPast = isPastKey(key);
@@ -438,7 +494,7 @@
           '<div class="dow">' + esc(d.toLocaleDateString('en-US', { weekday: 'short' })) +
           (isToday ? ' <span class="todaypill">• Today</span>' : '') + '</div>' +
           '<div class="dnum">' + d.getDate() + '</div>';
-        state.people.forEach(function (p) {
+        visiblePeople().forEach(function (p) {
           var cid = choiceFor(key, p.id);
           var o = cid ? optionById(cid) : null;
           html += '<div class="daychoice">' + personLabel(p) +
@@ -483,6 +539,35 @@
             '<button type="button" class="smallbtn danger" data-del-option="' + esc(o.id) + '">Delete</button></div>';
         }).join('');
       }
+      var ds = $('displaySettings');
+      var filter = loadFilter();
+      var dhtml = '<div class="mrow"><input type="checkbox" id="weekendToggle"' + (state.showWeekends ? ' checked' : '') + '><span class="flabel">Show Saturday and Sunday</span></div>' +
+        '<p class="hint">School lunches are Monday–Friday by default. This weekend setting is shared with every display.</p>' +
+        '<h2>On this display</h2>' +
+        '<p class="hint">Uncheck someone to hide them on this display only. Other displays are not affected. Checking everyone again shows everyone here (and you cannot hide everybody — clearing all resets to everyone).</p>';
+      if (!state.people.length) {
+        dhtml += '<p class="hint">Add people above first.</p>';
+      } else {
+        state.people.forEach(function (p) {
+          var checked = !filter.length || filter.indexOf(p.id) !== -1;
+          dhtml += '<div class="mrow"><input type="checkbox" data-filter-person="' + esc(p.id) + '"' + (checked ? ' checked' : '') + '><span class="em">' + esc(p.emoji || '👤') + '</span><span class="flabel">' + esc(p.name) + '</span></div>';
+        });
+      }
+      dhtml += '<button type="button" class="addbtn" id="filterResetBtn">Show everyone on this display</button>';
+      ds.innerHTML = dhtml;
+      $('weekendToggle').addEventListener('change', function () {
+        state.showWeekends = $('weekendToggle').checked;
+        save().then(function () { renderAll(); });
+      });
+      ds.querySelectorAll('[data-filter-person]').forEach(function (cb) {
+        cb.addEventListener('change', function () {
+          var checkedIds = [];
+          ds.querySelectorAll('[data-filter-person]:checked').forEach(function (c) { checkedIds.push(c.getAttribute('data-filter-person')); });
+          if (checkedIds.length === state.people.length) saveFilter([]); else saveFilter(checkedIds);
+          renderWeek(); renderManage();
+        });
+      });
+      $('filterResetBtn').addEventListener('click', function () { saveFilter([]); renderWeek(); renderManage(); });
       bindManageButtons();
     }
     function bindManageButtons() {
@@ -573,9 +658,10 @@
     function openChoiceDialog(key) {
       if (!state.people.length || !state.options.length) { setView('manage'); return; }
       dialogDateKey = key;
-      var withChoice = state.people.filter(function (p) { return choiceFor(key, p.id); });
-      var without = state.people.filter(function (p) { return !choiceFor(key, p.id); });
-      dialogPersonId = (without[0] || state.people[0]).id;
+      var vis = visiblePeople();
+      var withChoice = vis.filter(function (p) { return choiceFor(key, p.id); });
+      var without = vis.filter(function (p) { return !choiceFor(key, p.id); });
+      dialogPersonId = (without[0] || vis[0]).id;
       var d = new Date();
       var parts = key.split('-');
       d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
@@ -587,7 +673,7 @@
       var key = dialogDateKey;
       var peopleEl = $('choicePeople');
       peopleEl.innerHTML = '';
-      state.people.forEach(function (p) {
+      visiblePeople().forEach(function (p) {
         var b = document.createElement('button');
         b.type = 'button';
         b.className = 'personchip';
@@ -610,7 +696,7 @@
           if (!state.choices[key]) state.choices[key] = {};
           state.choices[key][dialogPersonId] = o.id;
           save().then(function () {
-            var next = state.people.filter(function (p) { return !choiceFor(key, p.id); })[0];
+            var next = visiblePeople().filter(function (p) { return !choiceFor(key, p.id); })[0];
             if (next) dialogPersonId = next.id;
             renderChoiceDialog();
             renderWeek();
@@ -651,9 +737,9 @@
 
     // ---- wiring ----
     function bindStatic() {
-      $('prevBtn').addEventListener('click', function () { viewStart = addDays(viewStart, -7); renderWeek(); });
-      $('nextBtn').addEventListener('click', function () { viewStart = addDays(viewStart, 7); renderWeek(); });
-      $('todayBtn').addEventListener('click', function () { viewStart = startOfDay(new Date()); renderWeek(); });
+      $('prevBtn').addEventListener('click', function () { weekMonday = addDays(weekMonday, -7); renderWeek(); });
+      $('nextBtn').addEventListener('click', function () { weekMonday = addDays(weekMonday, 7); renderWeek(); });
+      $('todayBtn').addEventListener('click', function () { weekMonday = defaultWeekMonday(); renderWeek(); });
       $('manageBtn').addEventListener('click', function () { setView(view === 'manage' ? 'week' : 'manage'); });
       $('backBtn').addEventListener('click', function () { setView('week'); });
       $('addPersonBtn').addEventListener('click', function () { openPersonDialog(null); });
@@ -735,11 +821,13 @@
           // only applies when a read FAILED; a missing doc is a first run.
           state = defaultState();
         }
+        weekMonday = defaultWeekMonday();
         renderAll();
         pollTimer = setInterval(poll, Math.max(5, settings.pollSeconds) * 1000);
       }).catch(function () {
         recoveryPending = true;
         state = defaultState();
+        weekMonday = defaultWeekMonday();
         renderAll();
         setSync('⚠️ Couldn’t read the household choices — showing this display only until storage comes back.', true);
         pollTimer = setInterval(function () {
