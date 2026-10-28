@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Lunch Choice</title>
+  <!--
+    Lunch Choice — a generic lunch-picker widget for HomeGlow.
+
+    A week view: today highlighted, days ahead shown. Tap a day and each
+    person chooses their lunch from parent-managed options. A choice is
+    per day, per person, so several people choose independently.
+
+    People and options are fully parent-configured: nothing is hardcoded
+    and no household data ships in the code. First run starts empty —
+    add people and options in Manage. Each option has a name plus an
+    emoji and a color, so pre-readers can choose by picture-like symbol.
+    An option may also carry an imageUrl (a remote http(s) picture URL),
+    shown when set, with the emoji as fallback. There is no picture
+    upload in v1: plugin frames cannot reach an upload route (their
+    token only covers their own plugin storage/settings/ha/notify
+    routes), and the whole document must fit the 64 KB per-key storage
+    cap, which rules out full photos as data URLs. See LunchChoice.md.
+
+    Storage (the contract other writers must follow):
+      HomeGlow.storage key "data", value:
+        { version: 1,
+          people: [ { id, name, emoji, color } ],
+          options: [ { id, name, emoji, color, imageUrl } ],
+          choices: { "YYYY-MM-DD": { "<personId>": "<optionId>" } },
+          updatedAt: ISO timestamp }
+    Choices are local dates (YYYY-MM-DD from local parts, never UTC).
+    The widget polls storage (default every 10s, setting `pollSeconds`)
+    so choices from another display appear without a reload. Polling
+    never clobbers an in-progress edit: a refresh is skipped while any
+    dialog is open. Concurrent edits: last write wins.
+
+    What it deliberately does NOT do: prices, reminders or due dates
+    (those belong to chores), or any integration with other apps. A choice
+    is just a choice; changing it is one tap.
+  -->
+  <script type="application/json" id="homeglow-manifest">
+  {
+    "manifestVersion": 1,
+    "id": "lunch-choice",
+    "name": "Lunch Choice",
+    "description": "Pick tomorrow's packed lunch: a week view where each person taps a day and chooses from parent-managed options, shown with big emoji so pre-readers can choose too.",
+    "apiVersion": "v1",
+    "storage": true,
+    "settings": [
+      {
+        "key": "pollSeconds",
+        "label": "How often to check for choices from other displays (seconds)",
+        "type": "number",
+        "default": 10,
+        "scope": "household"
+      }
+    ]
+  }
+  </script>
+  <link rel="stylesheet" href="/index.css">
+  <script src="/plugin-sdk/v1.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: transparent !important; }
+    body {
+      font-family: var(--hg-font-body, 'Inter', system-ui, -apple-system, sans-serif);
+      font-size: 0.95rem;
+      color: var(--text, #333);
+      padding: 0.75rem;
+    }
+    [data-theme="dark"] body { color: var(--text, #d6d6e8); }
+    .wrap { width: 100%; max-height: calc(100vh - 1.5rem); overflow-y: auto; container-type: inline-size; }
+    h1 { font-size: 1.25rem; margin: 0; }
+    button { font: inherit; cursor: pointer; }
+    .head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.25rem; }
+    .head .spacer { flex: 1; }
+    .navbtn, .managebtn, .todaybtn {
+      border: 1px solid var(--border, #ccc); border-radius: 10px;
+      background: var(--card, rgba(255,255,255,0.6)); color: inherit;
+      padding: 0.5rem 0.8rem; min-height: 44px;
+    }
+    [data-theme="dark"] .navbtn, [data-theme="dark"] .managebtn, [data-theme="dark"] .todaybtn {
+      background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2);
+    }
+    .weeklabel { font-weight: 600; margin: 0.25rem 0 0.75rem; }
+    .banner {
+      border: 1px dashed var(--border, #ccc); border-radius: 12px;
+      padding: 0.75rem; margin-bottom: 0.75rem;
+    }
+    .banner button { margin-top: 0.5rem; }
+    .todaybox {
+      border-radius: 12px; padding: 0.75rem; margin-bottom: 0.75rem;
+      background: var(--card, rgba(255,255,255,0.6));
+      border: 1px solid var(--border, #ddd);
+    }
+    [data-theme="dark"] .todaybox { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.15); }
+    .todaybox h2 { font-size: 1rem; margin: 0 0 0.5rem; }
+    .todayrow { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0; }
+    .todayrow .choice { font-weight: 600; }
+    .todayrow .choice .em { font-size: 1.4rem; }
+    .personchip {
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      border: 1px solid var(--border, #ccc); border-radius: 999px;
+      padding: 0.35rem 0.7rem; min-height: 44px; background: transparent; color: inherit;
+    }
+    .personchip[aria-pressed="true"] { outline: 3px solid var(--accent, #4a90d9); outline-offset: 1px; }
+    .dot { width: 14px; height: 14px; border-radius: 50%; flex: none; }
+    .daygrid { display: grid; gap: 0.6rem; grid-template-columns: 1fr; }
+    @container (min-width: 560px) { .daygrid { grid-template-columns: 1fr 1fr; } }
+    @container (min-width: 900px) { .daygrid { grid-template-columns: repeat(7, 1fr); } }
+    .daycard {
+      text-align: left; border-radius: 14px; padding: 0.6rem;
+      border: 1px solid var(--border, #ddd); color: inherit;
+      background: var(--card, rgba(255,255,255,0.55)); min-height: 120px;
+    }
+    [data-theme="dark"] .daycard { background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.15); }
+    .daycard.today { outline: 3px solid var(--accent, #4a90d9); outline-offset: 1px; }
+    .daycard.past { opacity: 0.55; cursor: default; }
+    .daycard .dow { font-weight: 700; }
+    .daycard .dnum { font-size: 1.4rem; font-weight: 700; line-height: 1.1; }
+    .daycard .todaypill { font-size: 0.75rem; font-weight: 700; }
+    .daychoice { display: flex; align-items: center; gap: 0.4rem; padding: 0.2rem 0; font-size: 0.9rem; }
+    .daychoice .em { font-size: 1.3rem; }
+    .daychoice .none { opacity: 0.6; }
+    .manage h2 { font-size: 1.05rem; margin: 1rem 0 0.5rem; }
+    .mrow {
+      display: flex; align-items: center; gap: 0.5rem; padding: 0.45rem 0;
+      border-bottom: 1px solid var(--border, #eee);
+    }
+    [data-theme="dark"] .mrow { border-bottom-color: rgba(255,255,255,0.12); }
+    .mrow .nm { flex: 1; }
+    .mrow .em { font-size: 1.5rem; }
+    .mrow .thumb { width: 40px; height: 40px; object-fit: cover; border-radius: 8px; flex: none; }
+    .smallbtn {
+      border: 1px solid var(--border, #ccc); border-radius: 8px; background: transparent;
+      color: inherit; padding: 0.35rem 0.6rem; min-height: 40px;
+    }
+    .smallbtn.danger.armed { background: #c0392b; color: #fff; border-color: #c0392b; }
+    .addbtn {
+      border: 1px solid var(--border, #ccc); border-radius: 10px; background: transparent;
+      color: inherit; padding: 0.5rem 0.9rem; min-height: 44px; margin-top: 0.5rem;
+    }
+    dialog {
+      border: 1px solid var(--border, #ccc); border-radius: 16px; padding: 1rem;
+      max-width: 560px; width: calc(100% - 2rem); color: var(--text, #333);
+      background: var(--card, #fff);
+    }
+    [data-theme="dark"] dialog { background: #2a2a3d; color: #d6d6e8; }
+    dialog::backdrop { background: rgba(0,0,0,0.4); }
+    dialog h2 { margin: 0 0 0.75rem; font-size: 1.1rem; }
+    dialog label { display: block; font-weight: 600; margin: 0.6rem 0 0.25rem; }
+    dialog input[type="text"], dialog input[type="url"] {
+      width: 100%; font: inherit; padding: 0.5rem; border-radius: 8px;
+      border: 1px solid var(--border, #ccc); background: transparent; color: inherit;
+    }
+    .pickrow { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.25rem; }
+    .pickbtn {
+      font-size: 1.5rem; line-height: 1; border: 1px solid var(--border, #ccc);
+      border-radius: 10px; background: transparent; min-width: 48px; min-height: 48px;
+    }
+    .pickbtn[aria-pressed="true"] { outline: 3px solid var(--accent, #4a90d9); outline-offset: 1px; }
+    .swatch {
+      width: 40px; height: 40px; border-radius: 50%; border: 2px solid transparent; padding: 0;
+    }
+    .swatch[aria-pressed="true"] { border-color: var(--accent, #4a90d9); outline: 2px solid var(--accent, #4a90d9); outline-offset: 1px; }
+    .optgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; margin-top: 0.5rem; }
+    .optbtn {
+      border: 1px solid var(--border, #ccc); border-radius: 14px; background: transparent;
+      color: inherit; padding: 0.6rem 0.25rem; min-height: 96px;
+      display: flex; flex-direction: column; align-items: center; gap: 0.25rem;
+    }
+    .optbtn.chosen { outline: 3px solid var(--accent, #4a90d9); outline-offset: 1px; }
+    .optbtn .em { font-size: 2.2rem; line-height: 1; }
+    .optbtn .otimg { width: 56px; height: 56px; object-fit: cover; border-radius: 10px; }
+    .optbtn .nm { font-size: 0.85rem; font-weight: 600; text-align: center; overflow-wrap: anywhere; }
+    .dlgfoot { display: flex; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap; }
+    .dlgfoot .spacer { flex: 1; }
+    .hint { font-size: 0.85rem; opacity: 0.75; }
+    .sync { font-size: 0.85rem; margin-top: 0.75rem; min-height: 1.2em; }
+    .sync.warn { color: #c0392b; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="head">
+      <h1>🍱 Lunch Choice</h1>
+      <span class="spacer"></span>
+      <button type="button" class="todaybtn" id="todayBtn">Today</button>
+      <button type="button" class="navbtn" id="prevBtn" aria-label="Previous week">‹</button>
+      <button type="button" class="navbtn" id="nextBtn" aria-label="Next week">›</button>
+      <button type="button" class="managebtn" id="manageBtn">Manage</button>
+    </div>
+    <div class="weeklabel" id="weekLabel"></div>
+
+    <div id="weekView">
+      <div id="emptyBanner" class="banner hidden"></div>
+      <div id="todayBox" class="todaybox hidden"></div>
+      <div class="daygrid" id="dayGrid"></div>
+    </div>
+
+    <div id="manageView" class="manage hidden">
+      <button type="button" class="navbtn" id="backBtn">‹ Back to week</button>
+      <h2>People</h2>
+      <div id="peopleList"></div>
+      <button type="button" class="addbtn" id="addPersonBtn">+ Add person</button>
+      <h2>Lunch options</h2>
+      <div id="optionsList"></div>
+      <button type="button" class="addbtn" id="addOptionBtn">+ Add option</button>
+      <p class="hint">Pictures: an option can show a remote picture URL (see the form). Uploading pictures from inside the widget is not supported yet — emoji and color are the pre-reader-friendly choice for now.</p>
+    </div>
+
+    <div class="sync" id="syncLine" role="status"></div>
+  </div>
+
+  <dialog id="choiceDialog" aria-label="Choose lunch">
+    <h2 id="choiceTitle">Choose lunch</h2>
+    <div class="pickrow" id="choicePeople"></div>
+    <div class="optgrid" id="choiceOptions"></div>
+    <div class="dlgfoot">
+      <button type="button" class="smallbtn" id="clearChoiceBtn">Clear choice</button>
+      <span class="spacer"></span>
+      <button type="button" class="navbtn" id="choiceDoneBtn">Done</button>
+    </div>
+  </dialog>
+
+  <dialog id="personDialog" aria-label="Person">
+    <h2 id="personTitle">Add person</h2>
+    <label for="personName">Name</label>
+    <input type="text" id="personName" maxlength="60" autocomplete="off">
+    <label>Face (emoji)</label>
+    <div class="pickrow" id="personEmojiPick"></div>
+    <label for="personEmojiCustom">Or type any emoji</label>
+    <input type="text" id="personEmojiCustom" maxlength="12" autocomplete="off" placeholder="👤">
+    <label>Color</label>
+    <div class="pickrow" id="personColorPick"></div>
+    <div class="dlgfoot">
+      <button type="button" class="navbtn" id="personSaveBtn">Save</button>
+      <button type="button" class="smallbtn" id="personCancelBtn">Cancel</button>
+    </div>
+  </dialog>
+
+  <dialog id="optionDialog" aria-label="Lunch option">
+    <h2 id="optionTitle">Add option</h2>
+    <label for="optionName">Name</label>
+    <input type="text" id="optionName" maxlength="80" autocomplete="off">
+    <label>Symbol (emoji)</label>
+    <div class="pickrow" id="optionEmojiPick"></div>
+    <label for="optionEmojiCustom">Or type any emoji</label>
+    <input type="text" id="optionEmojiCustom" maxlength="12" autocomplete="off" placeholder="🍽️">
+    <label>Color</label>
+    <div class="pickrow" id="optionColorPick"></div>
+    <label for="optionImageUrl">Picture URL (optional)</label>
+    <input type="url" id="optionImageUrl" maxlength="500" autocomplete="off" placeholder="https://…">
+    <p class="hint">A remote picture URL shows instead of the emoji. Only http(s) links are accepted. Uploading a picture file is not supported yet.</p>
+    <div class="dlgfoot">
+      <button type="button" class="navbtn" id="optionSaveBtn">Save</button>
+      <button type="button" class="smallbtn" id="optionCancelBtn">Cancel</button>
+    </div>
+  </dialog>
+  <script>
+  (function () {
+    var DOC_KEY = 'data';
+    var LS_KEY = 'homeglowLunchChoice.data';
+    var MAX_DOC_BYTES = 60000; // under the 64 KB server per-key cap
+    var COLORS = ['#e57373', '#f06292', '#ba68c8', '#7986cb', '#64b5f6', '#4db6ac', '#81c784', '#dce775', '#ffb74d', '#ff8a65'];
+    var FOOD_EMOJI = ['🥪', '🍕', '🍝', '🌮', '🥗', '🍎', '🍌', '🧀', '🥚', '🍗', '🥦', '🍓', '🥞', '🧇', '🥨', '🍩', '🍪', '🥛', '🧃', '🍫'];
+    var FACE_EMOJI = ['👤', '🧒', '👧', '🧑', '👦', '👩', '👨', '👵', '👴', '🐻', '🐱', '🐶', '🦊', '🐰', '🦁', '🐼'];
+
+    var state = null; // { version:1, people:[], options:[], choices:{}, updatedAt }
+    var settings = { pollSeconds: 10 };
+    var viewStart = startOfDay(new Date()); // first day of the shown 7-day window
+    var view = 'week'; // 'week' | 'manage'
+    var dialogDateKey = null;
+    var dialogPersonId = null;
+    var editingPersonId = null;
+    var editingOptionId = null;
+    var dialogOpen = false;
+    var recoveryPending = false;
+    var syncWarned = false;
+    var pollTimer = null;
+    var armedDelete = {}; // id -> timeout handle for two-tap deletes
+
+    function uid() { return 'x' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+    function nowIso() { return new Date().toISOString(); }
+    function esc(s) {
+      return String(s == null ? '' : s).replace(/[&<>\"']/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+      });
+    }
+    function $(id) { return document.getElementById(id); }
+    function startOfDay(d) { var x = new Date(d.getTime()); x.setHours(0, 0, 0, 0); return x; }
+    function addDays(d, n) { var x = new Date(d.getTime()); x.setDate(x.getDate() + n); return x; }
+    function dateKey(d) {
+      return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+    }
+    function fmtDay(d) {
+      return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    }
+    function todayKey() { return dateKey(new Date()); }
+    function isPastKey(key) { return key < todayKey(); }
+    function personById(id) { return (state.people || []).filter(function (p) { return p.id === id; })[0] || null; }
+    function optionById(id) { return (state.options || []).filter(function (o) { return o.id === id; })[0] || null; }
+    function choiceFor(dateKeyStr, personId) {
+      var day = (state.choices || {})[dateKeyStr] || {};
+      return day[personId] || null;
+    }
+    function validImageUrl(u) {
+      return typeof u === 'string' && /^https?:\/\//i.test(u.trim());
+    }
+
+    // ---- storage: SDK first, localStorage fallback (standalone preview) ----
+    function sdkOk() {
+      try { return !!(window.HomeGlow && window.HomeGlow.storage && window.HomeGlow.pluginId); } catch (e) { return false; }
+    }
+    function loadRemote() {
+      if (sdkOk()) return window.HomeGlow.storage.get(DOC_KEY);
+      try {
+        var raw = localStorage.getItem(LS_KEY);
+        return Promise.resolve(raw ? JSON.parse(raw) : null);
+      } catch (e) { return Promise.resolve(null); }
+    }
+    function saveRemote(doc) {
+      doc.updatedAt = nowIso();
+      if (sdkOk()) {
+        if (recoveryPending) {
+          try { localStorage.setItem(LS_KEY, JSON.stringify(doc)); } catch (e) {}
+          return Promise.resolve();
+        }
+        return window.HomeGlow.storage.set(DOC_KEY, doc).then(function () {
+          if (syncWarned) { syncWarned = false; setSync(''); }
+        }).catch(function () {
+          try { localStorage.setItem(LS_KEY, JSON.stringify(doc)); } catch (e) {}
+          syncWarned = true;
+          setSync('⚠️ Couldn’t save to the household choices — kept on this display only.', true);
+        });
+      }
+      try { localStorage.setItem(LS_KEY, JSON.stringify(doc)); } catch (e) {}
+      return Promise.resolve();
+    }
+    function loadSettings() {
+      if (window.HomeGlow && window.HomeGlow.settings && typeof window.HomeGlow.settings.get === 'function') {
+        return window.HomeGlow.settings.get().then(function (s) {
+          if (s && typeof s === 'object' && typeof s.pollSeconds === 'number' && s.pollSeconds >= 5) {
+            settings.pollSeconds = s.pollSeconds;
+          }
+        }).catch(function () {});
+      }
+      return Promise.resolve();
+    }
+    function defaultState() {
+      // First run starts empty: no people, no options, no choices.
+      // Seeding example names would look like real household data.
+      return { version: 1, people: [], options: [], choices: {}, updatedAt: nowIso() };
+    }
+    function normalize(doc) {
+      if (!doc || typeof doc !== 'object') return defaultState();
+      return {
+        version: 1,
+        people: Array.isArray(doc.people) ? doc.people.filter(function (p) { return p && p.id && p.name; }) : [],
+        options: Array.isArray(doc.options) ? doc.options.filter(function (o) { return o && o.id && o.name; }) : [],
+        choices: (doc.choices && typeof doc.choices === 'object') ? doc.choices : {},
+        updatedAt: doc.updatedAt || nowIso()
+      };
+    }
+    function save() {
+      if (JSON.stringify(state).length > MAX_DOC_BYTES) {
+        setSync('⚠️ Too much saved data — remove an option or shorten a name, then try again.', true);
+        return Promise.resolve();
+      }
+      return saveRemote(state);
+    }
+    function setSync(msg, warn) {
+      var el = $('syncLine');
+      el.textContent = msg || '';
+      el.className = 'sync' + (warn ? ' warn' : '');
+    }
+
+    // ---- rendering ----
+    function personLabel(p) {
+      return '<span class="dot" style="background:' + esc(p.color || '#999') + '"></span>' +
+        '<span>' + esc(p.emoji || '👤') + ' ' + esc(p.name) + '</span>';
+    }
+    function optionVisual(o, cls) {
+      if (o.imageUrl && validImageUrl(o.imageUrl)) {
+        return '<img class="' + (cls || 'otimg') + '" src="' + esc(o.imageUrl) + '" alt="" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'inline\';">' +
+          '<span class="em" style="display:none">' + esc(o.emoji || '🍽️') + '</span>';
+      }
+      return '<span class="em">' + esc(o.emoji || '🍽️') + '</span>';
+    }
+    function renderWeekLabel() {
+      var end = addDays(viewStart, 6);
+      $('weekLabel').textContent = viewStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) +
+        ' – ' + end.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+    function renderTodayBox() {
+      var box = $('todayBox');
+      var tk = todayKey();
+      if (!state.people.length) { box.classList.add('hidden'); return; }
+      box.classList.remove('hidden');
+      var html = '<h2>Today — ' + esc(fmtDay(new Date())) + '</h2>';
+      state.people.forEach(function (p) {
+        var cid = choiceFor(tk, p.id);
+        var o = cid ? optionById(cid) : null;
+        html += '<div class="todayrow">' + personLabel(p) + '<span class="choice">' +
+          (o ? optionVisual(o, 'em') + ' ' + esc(o.name) : '<span class="none">Not chosen yet</span>') + '</span></div>';
+      });
+      box.innerHTML = html;
+    }
+    function renderWeek() {
+      renderWeekLabel();
+      var banner = $('emptyBanner');
+      if (!state.people.length) {
+        banner.classList.remove('hidden');
+        banner.innerHTML = 'No people yet. Add the people who choose lunch, then add lunch options.' +
+          ' <button type="button" class="navbtn" id="bannerManage">Manage</button>';
+        $('bannerManage').addEventListener('click', function () { setView('manage'); });
+      } else if (!state.options.length) {
+        banner.classList.remove('hidden');
+        banner.innerHTML = 'No lunch options yet. Add options in Manage so there is something to choose from.' +
+          ' <button type="button" class="navbtn" id="bannerManage">Manage</button>';
+        $('bannerManage').addEventListener('click', function () { setView('manage'); });
+      } else {
+        banner.classList.add('hidden');
+        banner.innerHTML = '';
+      }
+      renderTodayBox();
+      var tk = todayKey();
+      var html = '';
+      for (var i = 0; i < 7; i++) {
+        var d = addDays(viewStart, i);
+        var key = dateKey(d);
+        var isToday = key === tk;
+        var isPast = isPastKey(key);
+        html += '<button type="button" class="daycard' + (isToday ? ' today' : '') + (isPast ? ' past' : '') + '"' +
+          (isPast ? ' disabled aria-disabled="true"' : '') +
+          ' data-date="' + key + '" aria-label="Choose lunch for ' + esc(fmtDay(d)) + '">' +
+          '<div class="dow">' + esc(d.toLocaleDateString('en-US', { weekday: 'short' })) +
+          (isToday ? ' <span class="todaypill">• Today</span>' : '') + '</div>' +
+          '<div class="dnum">' + d.getDate() + '</div>';
+        state.people.forEach(function (p) {
+          var cid = choiceFor(key, p.id);
+          var o = cid ? optionById(cid) : null;
+          html += '<div class="daychoice">' + personLabel(p) +
+            (o ? '<span>' + optionVisual(o, 'em') + ' ' + esc(o.name) + '</span>' :
+              '<span class="none">—</span>') + '</div>';
+        });
+        html += '</button>';
+      }
+      var grid = $('dayGrid');
+      grid.innerHTML = html;
+      var cards = grid.querySelectorAll('.daycard[data-date]');
+      for (var j = 0; j < cards.length; j++) {
+        (function (card) {
+          card.addEventListener('click', function () { openChoiceDialog(card.getAttribute('data-date')); });
+        })(cards[j]);
+      }
+    }
+    function renderManage() {
+      var pl = $('peopleList');
+      if (!state.people.length) {
+        pl.innerHTML = '<p class="hint">No people yet. Add the people who choose lunch.</p>';
+      } else {
+        pl.innerHTML = state.people.map(function (p) {
+          return '<div class="mrow"><span class="em">' + esc(p.emoji || '👤') + '</span>' +
+            '<span class="dot" style="background:' + esc(p.color || '#999') + '"></span>' +
+            '<span class="nm">' + esc(p.name) + '</span>' +
+            '<button type="button" class="smallbtn" data-edit-person="' + esc(p.id) + '">Edit</button>' +
+            '<button type="button" class="smallbtn danger" data-del-person="' + esc(p.id) + '">Delete</button></div>';
+        }).join('');
+      }
+      var ol = $('optionsList');
+      if (!state.options.length) {
+        ol.innerHTML = '<p class="hint">No lunch options yet. Add the lunches parents pack.</p>';
+      } else {
+        ol.innerHTML = state.options.map(function (o) {
+          var thumb = (o.imageUrl && validImageUrl(o.imageUrl)) ?
+            '<img class="thumb" src="' + esc(o.imageUrl) + '" alt="" onerror="this.style.display=\'none\'">' : '';
+          return '<div class="mrow">' + thumb + '<span class="em">' + esc(o.emoji || '🍽️') + '</span>' +
+            '<span class="dot" style="background:' + esc(o.color || '#999') + '"></span>' +
+            '<span class="nm">' + esc(o.name) + '</span>' +
+            '<button type="button" class="smallbtn" data-edit-option="' + esc(o.id) + '">Edit</button>' +
+            '<button type="button" class="smallbtn danger" data-del-option="' + esc(o.id) + '">Delete</button></div>';
+        }).join('');
+      }
+      bindManageButtons();
+    }
+    function bindManageButtons() {
+      document.querySelectorAll('[data-edit-person]').forEach(function (b) {
+        b.addEventListener('click', function () { openPersonDialog(b.getAttribute('data-edit-person')); });
+      });
+      document.querySelectorAll('[data-edit-option]').forEach(function (b) {
+        b.addEventListener('click', function () { openOptionDialog(b.getAttribute('data-edit-option')); });
+      });
+      document.querySelectorAll('[data-del-person]').forEach(function (b) {
+        b.addEventListener('click', function () { armDelete(b, 'person', b.getAttribute('data-del-person')); });
+      });
+      document.querySelectorAll('[data-del-option]').forEach(function (b) {
+        b.addEventListener('click', function () { armDelete(b, 'option', b.getAttribute('data-del-option')); });
+      });
+    }
+    function armDelete(btn, kind, id) {
+      var key = kind + ':' + id;
+      if (armedDelete[key]) {
+        clearTimeout(armedDelete[key]);
+        delete armedDelete[key];
+        if (kind === 'person') {
+          state.people = state.people.filter(function (p) { return p.id !== id; });
+          Object.keys(state.choices || {}).forEach(function (dk) { delete state.choices[dk][id]; });
+        } else {
+          state.options = state.options.filter(function (o) { return o.id !== id; });
+          Object.keys(state.choices || {}).forEach(function (dk) {
+            Object.keys(state.choices[dk]).forEach(function (pid) {
+              if (state.choices[dk][pid] === id) delete state.choices[dk][pid];
+            });
+          });
+        }
+        save().then(function () { renderManage(); renderWeek(); });
+        return;
+      }
+      btn.textContent = 'Sure?';
+      btn.classList.add('armed');
+      armedDelete[key] = setTimeout(function () {
+        delete armedDelete[key];
+        btn.textContent = 'Delete';
+        btn.classList.remove('armed');
+      }, 3000);
+    }
+    function setView(v) {
+      view = v;
+      $('weekView').classList.toggle('hidden', v !== 'week');
+      $('manageView').classList.toggle('hidden', v !== 'manage');
+      $('manageBtn').textContent = v === 'manage' ? 'Week' : 'Manage';
+      if (v === 'manage') renderManage(); else renderWeek();
+    }
+    function renderAll() { if (view === 'manage') renderManage(); else renderWeek(); }
+
+    // ---- dialogs ----
+    function openDialog(dlg) {
+      dialogOpen = true;
+      try { dlg.showModal(); } catch (e) { try { dlg.show(); } catch (e2) {} }
+    }
+    function closeDialog(dlg) {
+      try { dlg.close(); } catch (e) {}
+      dialogOpen = false;
+      renderAll();
+    }
+    function pickRow(el, values, current, onPick) {
+      el.innerHTML = '';
+      values.forEach(function (v) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'pickbtn';
+        b.textContent = v;
+        b.setAttribute('aria-pressed', v === current ? 'true' : 'false');
+        b.addEventListener('click', function () { onPick(v); });
+        el.appendChild(b);
+      });
+    }
+    function colorRow(el, current, onPick) {
+      el.innerHTML = '';
+      COLORS.forEach(function (c) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'swatch';
+        b.style.background = c;
+        b.setAttribute('aria-label', 'Color ' + c);
+        b.setAttribute('aria-pressed', c === current ? 'true' : 'false');
+        b.addEventListener('click', function () { onPick(c); });
+        el.appendChild(b);
+      });
+    }
+    function openChoiceDialog(key) {
+      if (!state.people.length || !state.options.length) { setView('manage'); return; }
+      dialogDateKey = key;
+      var withChoice = state.people.filter(function (p) { return choiceFor(key, p.id); });
+      var without = state.people.filter(function (p) { return !choiceFor(key, p.id); });
+      dialogPersonId = (without[0] || state.people[0]).id;
+      var d = new Date();
+      var parts = key.split('-');
+      d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+      $('choiceTitle').textContent = 'Choose lunch — ' + fmtDay(d);
+      renderChoiceDialog();
+      openDialog($('choiceDialog'));
+    }
+    function renderChoiceDialog() {
+      var key = dialogDateKey;
+      var peopleEl = $('choicePeople');
+      peopleEl.innerHTML = '';
+      state.people.forEach(function (p) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'personchip';
+        b.setAttribute('aria-pressed', p.id === dialogPersonId ? 'true' : 'false');
+        var has = !!choiceFor(key, p.id);
+        b.innerHTML = '<span class="dot" style="background:' + esc(p.color || '#999') + '"></span>' +
+          '<span>' + esc(p.emoji || '👤') + ' ' + esc(p.name) + (has ? ' ✓' : '') + '</span>';
+        b.addEventListener('click', function () { dialogPersonId = p.id; renderChoiceDialog(); });
+        peopleEl.appendChild(b);
+      });
+      var optsEl = $('choiceOptions');
+      optsEl.innerHTML = '';
+      state.options.forEach(function (o) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'optbtn' + (choiceFor(key, dialogPersonId) === o.id ? ' chosen' : '');
+        b.style.borderColor = o.color || '';
+        b.innerHTML = optionVisual(o, 'otimg') + '<span class="nm">' + esc(o.name) + '</span>';
+        b.addEventListener('click', function () {
+          if (!state.choices[key]) state.choices[key] = {};
+          state.choices[key][dialogPersonId] = o.id;
+          save().then(function () {
+            var next = state.people.filter(function (p) { return !choiceFor(key, p.id); })[0];
+            if (next) dialogPersonId = next.id;
+            renderChoiceDialog();
+            renderWeek();
+          });
+        });
+        optsEl.appendChild(b);
+      });
+    }
+    function openPersonDialog(id) {
+      editingPersonId = id || null;
+      var p = id ? personById(id) : null;
+      $('personTitle').textContent = p ? 'Edit person' : 'Add person';
+      $('personName').value = p ? p.name : '';
+      $('personEmojiCustom').value = p ? (p.emoji || '') : '';
+      var cur = p ? (p.emoji || '👤') : '👤';
+      var col = p ? (p.color || COLORS[0]) : COLORS[0];
+      pickRow($('personEmojiPick'), FACE_EMOJI, cur, function (v) { $('personEmojiCustom').value = v; });
+      colorRow($('personColorPick'), col, function (c) { $('personColorPick').dataset.picked = c; });
+      $('personColorPick').dataset.picked = col;
+      openDialog($('personDialog'));
+      setTimeout(function () { $('personName').focus(); }, 50);
+    }
+    function openOptionDialog(id) {
+      editingOptionId = id || null;
+      var o = id ? optionById(id) : null;
+      $('optionTitle').textContent = o ? 'Edit option' : 'Add option';
+      $('optionName').value = o ? o.name : '';
+      $('optionEmojiCustom').value = o ? (o.emoji || '') : '';
+      $('optionImageUrl').value = o ? (o.imageUrl || '') : '';
+      var cur = o ? (o.emoji || '🍽️') : '🍽️';
+      var col = o ? (o.color || COLORS[0]) : COLORS[0];
+      pickRow($('optionEmojiPick'), FOOD_EMOJI, cur, function (v) { $('optionEmojiCustom').value = v; });
+      colorRow($('optionColorPick'), col, function (c) { $('optionColorPick').dataset.picked = c; });
+      $('optionColorPick').dataset.picked = col;
+      openDialog($('optionDialog'));
+      setTimeout(function () { $('optionName').focus(); }, 50);
+    }
+
+    // ---- wiring ----
+    function bindStatic() {
+      $('prevBtn').addEventListener('click', function () { viewStart = addDays(viewStart, -7); renderWeek(); });
+      $('nextBtn').addEventListener('click', function () { viewStart = addDays(viewStart, 7); renderWeek(); });
+      $('todayBtn').addEventListener('click', function () { viewStart = startOfDay(new Date()); renderWeek(); });
+      $('manageBtn').addEventListener('click', function () { setView(view === 'manage' ? 'week' : 'manage'); });
+      $('backBtn').addEventListener('click', function () { setView('week'); });
+      $('addPersonBtn').addEventListener('click', function () { openPersonDialog(null); });
+      $('addOptionBtn').addEventListener('click', function () { openOptionDialog(null); });
+      $('choiceDoneBtn').addEventListener('click', function () { closeDialog($('choiceDialog')); });
+      $('choiceDialog').addEventListener('click', function (e) {
+        if (e.target === $('choiceDialog')) closeDialog($('choiceDialog'));
+      });
+      $('choiceDialog').addEventListener('close', function () { dialogOpen = false; renderAll(); });
+      $('clearChoiceBtn').addEventListener('click', function () {
+        if (dialogDateKey && dialogPersonId && state.choices[dialogDateKey]) {
+          delete state.choices[dialogDateKey][dialogPersonId];
+          save().then(function () { renderChoiceDialog(); renderWeek(); });
+        }
+      });
+      $('personSaveBtn').addEventListener('click', function () {
+        var name = $('personName').value.trim();
+        if (!name) { $('personName').focus(); return; }
+        var emoji = ($('personEmojiCustom').value.trim() || '👤').slice(0, 4);
+        var color = $('personColorPick').dataset.picked || COLORS[0];
+        if (editingPersonId) {
+          var p = personById(editingPersonId);
+          if (p) { p.name = name; p.emoji = emoji; p.color = color; }
+        } else {
+          state.people.push({ id: uid(), name: name, emoji: emoji, color: color });
+        }
+        save().then(function () { closeDialog($('personDialog')); });
+      });
+      $('personCancelBtn').addEventListener('click', function () { closeDialog($('personDialog')); });
+      $('personDialog').addEventListener('close', function () { dialogOpen = false; renderAll(); });
+      $('optionSaveBtn').addEventListener('click', function () {
+        var name = $('optionName').value.trim();
+        if (!name) { $('optionName').focus(); return; }
+        var emoji = ($('optionEmojiCustom').value.trim() || '🍽️').slice(0, 4);
+        var color = $('optionColorPick').dataset.picked || COLORS[0];
+        var img = $('optionImageUrl').value.trim();
+        if (img && !validImageUrl(img)) {
+          setSync('⚠️ Picture URL must start with http:// or https://.', true);
+          $('optionImageUrl').focus();
+          return;
+        }
+        var data = { name: name, emoji: emoji, color: color, imageUrl: img || null };
+        if (editingOptionId) {
+          var o = optionById(editingOptionId);
+          if (o) { o.name = data.name; o.emoji = data.emoji; o.color = data.color; o.imageUrl = data.imageUrl; }
+        } else {
+          state.options.push(Object.assign({ id: uid() }, data));
+        }
+        setSync('');
+        save().then(function () { closeDialog($('optionDialog')); });
+      });
+      $('optionCancelBtn').addEventListener('click', function () { closeDialog($('optionDialog')); });
+      $('optionDialog').addEventListener('close', function () { dialogOpen = false; renderAll(); });
+    }
+    function poll() {
+      if (dialogOpen) return;
+      loadRemote().then(function (doc) {
+        if (doc && JSON.stringify(normalize(doc)) !== JSON.stringify(state)) {
+          state = normalize(doc);
+          renderAll();
+        }
+      }).catch(function () {});
+    }
+    function boot() {
+      try {
+        var params = new URLSearchParams(window.location.search);
+        var theme = params.get('theme');
+        if (theme === 'dark' || theme === 'light') document.documentElement.setAttribute('data-theme', theme);
+      } catch (e) {}
+      bindStatic();
+      loadSettings().then(function () {
+        return loadRemote();
+      }).then(function (doc) {
+        if (doc) {
+          state = normalize(doc);
+          recoveryPending = false;
+        } else {
+          // No remote document yet: start empty locally. recoveryPending
+          // only applies when a read FAILED; a missing doc is a first run.
+          state = defaultState();
+        }
+        renderAll();
+        pollTimer = setInterval(poll, Math.max(5, settings.pollSeconds) * 1000);
+      }).catch(function () {
+        recoveryPending = true;
+        state = defaultState();
+        renderAll();
+        setSync('⚠️ Couldn’t read the household choices — showing this display only until storage comes back.', true);
+        pollTimer = setInterval(function () {
+          loadRemote().then(function (doc) {
+            if (doc) { recoveryPending = false; state = normalize(doc); setSync(''); renderAll(); }
+          }).catch(function () {});
+        }, Math.max(5, settings.pollSeconds) * 1000);
+      });
+    }
+    document.addEventListener('DOMContentLoaded', boot);
+  })();
+  </script>
+</body>
+</html>
