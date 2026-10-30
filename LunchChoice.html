@@ -13,25 +13,41 @@
     A display can also show only some people (a per-display filter stored
     on the display itself, not in the shared doc) - see LunchChoice.md.
 
-    People and options are fully parent-configured: nothing is hardcoded
-    and no household data ships in the code. First run starts empty —
-    add people and options in Manage. Each option has a name plus an
-    emoji and a color, so pre-readers can choose by picture-like symbol.
+    People come from the household itself, not from a create form:
+    Manage reads the HomeGlow user list (GET /api/users, a read-only
+    core route the plugin request policy allows plugins with their
+    frame token) and parents select which users are lunch choosers.
+    Each user shows their household profile picture when set, else a
+    generic glyph. Nothing is hardcoded and no household data ships in
+    the code. First run starts with nobody selected — select users in
+    Manage. Each option has a name plus an emoji and a color, so
+    pre-readers can choose by picture-like symbol.
     An option may also carry an imageUrl (a remote http(s) picture URL),
     shown when set, with the emoji as fallback. There is no picture
     upload in v1: plugin frames cannot reach an upload route (their
     token only covers their own plugin storage/settings/ha/notify
-    routes), and the whole document must fit the 64 KB per-key storage
-    cap, which rules out full photos as data URLs. See LunchChoice.md.
+    routes, plus the documented read-only core routes), and the whole
+    document must fit the 64 KB per-key storage cap, which rules out
+    full photos as data URLs. See LunchChoice.md.
+
+    The week view fits its container: it shows a window of days
+    starting at the next lunch to pick (tomorrow, or the next school
+    day when tomorrow is not one), and the number of days shown grows
+    with the widget's actual width — a small widget shows only that
+    next day, a large one shows the full week. Day cards stretch to
+    fill the row. Week paging (‹/›) and the Today button are unchanged.
 
     Storage (the contract other writers must follow):
       HomeGlow.storage key "data", value:
         { version: 1,
-          people: [ { id, name, emoji, color } ],
+          selectedUserIds: [ <core user id, number> ],
           options: [ { id, name, emoji, color, imageUrl } ],
-          choices: { "YYYY-MM-DD": { "<personId>": "<optionId>" } },
+          choices: { "YYYY-MM-DD": { "u<userId>": "<optionId>" } },
           showWeekends: false,
           updatedAt: ISO timestamp }
+    The legacy `people` array and choices keyed by custom person ids,
+    from before users came from the household list, are preserved in
+    the document untouched on save but are no longer rendered.
     showWeekends is household-wide (all displays share it); the per-display
     people filter lives in this display's localStorage shim only, never in
     the shared doc. Older docs without showWeekends default to false.
@@ -139,6 +155,12 @@
     .mrow .flabel { flex: 1; }
     .mrow input[type="checkbox"] { width: 22px; height: 22px; flex: none; accent-color: var(--accent, #4a90d9); }
     .mrow .em { font-size: 1.5rem; }
+    .mrow .avatar { width: 40px; height: 40px; object-fit: cover; border-radius: 50%; flex: none; }
+    .mrow .avatar-fallback { font-size: 1.5rem; flex: none; }
+    .personchip .avatar { width: 26px; height: 26px; object-fit: cover; border-radius: 50%; flex: none; }
+    .personchip .avatar-fallback { font-size: 1.3rem; }
+    .daychoice .avatar { width: 22px; height: 22px; object-fit: cover; border-radius: 50%; flex: none; }
+    .daychoice .avatar-fallback { font-size: 1.1rem; }
     .mrow .thumb { width: 40px; height: 40px; object-fit: cover; border-radius: 8px; flex: none; }
     .smallbtn {
       border: 1px solid var(--border, #ccc); border-radius: 8px; background: transparent;
@@ -212,7 +234,6 @@
       <button type="button" class="navbtn" id="backBtn">‹ Back to week</button>
       <h2>People</h2>
       <div id="peopleList"></div>
-      <button type="button" class="addbtn" id="addPersonBtn">+ Add person</button>
       <h2>Lunch options</h2>
       <div id="optionsList"></div>
       <button type="button" class="addbtn" id="addOptionBtn">+ Add option</button>
@@ -232,22 +253,6 @@
       <button type="button" class="smallbtn" id="clearChoiceBtn">Clear choice</button>
       <span class="spacer"></span>
       <button type="button" class="navbtn" id="choiceDoneBtn">Done</button>
-    </div>
-  </dialog>
-
-  <dialog id="personDialog" aria-label="Person">
-    <h2 id="personTitle">Add person</h2>
-    <label for="personName">Name</label>
-    <input type="text" id="personName" maxlength="60" autocomplete="off">
-    <label>Face (emoji)</label>
-    <div class="pickrow" id="personEmojiPick"></div>
-    <label for="personEmojiCustom">Or type any emoji</label>
-    <input type="text" id="personEmojiCustom" maxlength="12" autocomplete="off" placeholder="👤">
-    <label>Color</label>
-    <div class="pickrow" id="personColorPick"></div>
-    <div class="dlgfoot">
-      <button type="button" class="navbtn" id="personSaveBtn">Save</button>
-      <button type="button" class="smallbtn" id="personCancelBtn">Cancel</button>
     </div>
   </dialog>
 
@@ -277,15 +282,16 @@
     var MAX_DOC_BYTES = 60000; // under the 64 KB server per-key cap
     var COLORS = ['#e57373', '#f06292', '#ba68c8', '#7986cb', '#64b5f6', '#4db6ac', '#81c784', '#dce775', '#ffb74d', '#ff8a65'];
     var FOOD_EMOJI = ['🥪', '🍕', '🍝', '🌮', '🥗', '🍎', '🍌', '🧀', '🥚', '🍗', '🥦', '🍓', '🥞', '🧇', '🥨', '🍩', '🍪', '🥛', '🧃', '🍫'];
-    var FACE_EMOJI = ['👤', '🧒', '👧', '🧑', '👦', '👩', '👨', '👵', '👴', '🐻', '🐱', '🐶', '🦊', '🐰', '🦁', '🐼'];
 
-    var state = null; // { version:1, people:[], options:[], choices:{}, updatedAt }
+    var state = null; // { version:1, selectedUserIds:[], options:[], choices:{}, updatedAt } (+ dormant legacy people)
+    var coreUsers = []; // household users from GET /api/users, excluding the id-0 bonus pseudo-user
+    var usersError = false;
+    var containerWidth = 0; // .wrap width in px, via ResizeObserver (0 = unmeasured: show the full week)
     var settings = { pollSeconds: 10 };
     var weekMonday = null; // Monday of the shown calendar week (set after state loads)
     var view = 'week'; // 'week' | 'manage'
     var dialogDateKey = null;
     var dialogPersonId = null;
-    var editingPersonId = null;
     var editingOptionId = null;
     var dialogOpen = false;
     var recoveryPending = false;
@@ -343,13 +349,54 @@
     function saveFilter(ids) {
       try { localStorage.setItem(LS_FILTER_KEY, JSON.stringify(ids)); } catch (e) {}
     }
-    function visiblePeople() {
-      var f = loadFilter();
-      if (!f.length) return state.people;
-      var shown = state.people.filter(function (p) { return f.indexOf(p.id) !== -1; });
-      return shown.length ? shown : state.people;
+    // ---- household users (Part 1): read-only core route, allowed for
+    // plugins with their frame token (server/utils/pluginRequestPolicy.js
+    // READ_ROUTES). The frame shim attaches the token to same-host
+    // fetches, so a plain fetch works; no SDK users method exists or
+    // is needed. Id 0 is the bonus pseudo-user and never renders on
+    // the dashboard, so it is never a lunch chooser.
+    function avatarUrl(u) {
+      var pp = u && u.profile_picture;
+      if (typeof pp !== 'string' || !pp) return null;
+      if (pp.indexOf('data:') === 0) return pp;
+      return '/Uploads/users/' + pp;
     }
-    function personById(id) { return (state.people || []).filter(function (p) { return p.id === id; })[0] || null; }
+    function userPerson(u) {
+      return { id: 'u' + u.id, userId: u.id, name: u.username, avatar: avatarUrl(u) };
+    }
+    function loadUsers() {
+      return fetch('/api/users').then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      }).then(function (list) {
+        if (!Array.isArray(list)) throw new Error('bad users payload');
+        coreUsers = list.filter(function (u) { return u && u.id !== 0 && u.username; });
+        usersError = false;
+        return coreUsers;
+      }).catch(function () {
+        usersError = true;
+        return coreUsers; // keep any previously loaded cache
+      });
+    }
+    function selectedPeople() {
+      var ids = (state && Array.isArray(state.selectedUserIds)) ? state.selectedUserIds : [];
+      var out = [];
+      ids.forEach(function (id) {
+        var u = null;
+        for (var i = 0; i < coreUsers.length; i++) { if (coreUsers[i].id === id) { u = coreUsers[i]; break; } }
+        if (u) out.push(userPerson(u));
+        else out.push({ id: 'u' + id, userId: id, name: 'User ' + id, avatar: null });
+      });
+      return out;
+    }
+    function visiblePeople() {
+      var sel = selectedPeople();
+      var f = loadFilter();
+      if (!f.length) return sel;
+      var shown = sel.filter(function (p) { return f.indexOf(p.id) !== -1; });
+      return shown.length ? shown : sel;
+    }
+    function personById(id) { return selectedPeople().filter(function (p) { return p.id === id; })[0] || null; }
     function optionById(id) { return (state.options || []).filter(function (o) { return o.id === id; })[0] || null; }
     function choiceFor(dateKeyStr, personId) {
       var day = (state.choices || {})[dateKeyStr] || {};
@@ -399,14 +446,17 @@
       return Promise.resolve();
     }
     function defaultState() {
-      // First run starts empty: no people, no options, no choices.
-      // Seeding example names would look like real household data.
-      return { version: 1, people: [], options: [], choices: {}, showWeekends: false, updatedAt: nowIso() };
+      // First run starts with nobody selected: select users in Manage.
+      // No example names — nothing here may look like household data.
+      return { version: 1, selectedUserIds: [], options: [], choices: {}, showWeekends: false, updatedAt: nowIso() };
     }
     function normalize(doc) {
       if (!doc || typeof doc !== 'object') return defaultState();
+      var sel = Array.isArray(doc.selectedUserIds) ? doc.selectedUserIds.filter(function (id) { return typeof id === 'number'; }) : [];
       return {
         version: 1,
+        selectedUserIds: sel,
+        // Dormant legacy data: preserved untouched on save, never rendered.
         people: Array.isArray(doc.people) ? doc.people.filter(function (p) { return p && p.id && p.name; }) : [],
         options: Array.isArray(doc.options) ? doc.options.filter(function (o) { return o && o.id && o.name; }) : [],
         choices: (doc.choices && typeof doc.choices === 'object') ? doc.choices : {},
@@ -428,9 +478,15 @@
     }
 
     // ---- rendering ----
+    function avatarHtml(p, cls) {
+      if (p.avatar) {
+        return '<img class="' + (cls || 'avatar') + '" src="' + esc(p.avatar) + '" alt="" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'inline\';">' +
+          '<span class="avatar-fallback" style="display:none">👤</span>';
+      }
+      return '<span class="avatar-fallback">👤</span>';
+    }
     function personLabel(p) {
-      return '<span class="dot" style="background:' + esc(p.color || '#999') + '"></span>' +
-        '<span>' + esc(p.emoji || '👤') + ' ' + esc(p.name) + '</span>';
+      return avatarHtml(p, 'avatar') + '<span>' + esc(p.name) + '</span>';
     }
     function optionVisual(o, cls) {
       if (o.imageUrl && validImageUrl(o.imageUrl)) {
@@ -439,8 +495,36 @@
       }
       return '<span class="em">' + esc(o.emoji || '🍽️') + '</span>';
     }
-    function renderWeekLabel() {
+    // ---- responsive week window (Part 2): the visible days start at
+    // the next lunch to pick and grow with the widget's actual width.
+    // Fit count: one day card needs ~170px to stay usable, so the count
+    // is floor(width / 170), at least 1, capped at the week's days.
+    function fitCount(total) {
+      if (!containerWidth) return total;
+      return Math.max(1, Math.min(total, Math.floor(containerWidth / 170)));
+    }
+    function windowedDays() {
       var days = visibleDays();
+      var tk = todayKey();
+      var ai = -1;
+      for (var i = 0; i < days.length; i++) { if (dateKey(days[i]) > tk) { ai = i; break; } }
+      if (ai === -1) {
+        var containsToday = false;
+        for (var j = 0; j < days.length; j++) { if (dateKey(days[j]) === tk) containsToday = true; }
+        if (containsToday) {
+          // This week's lunches are done (e.g. Friday, weekends hidden):
+          // advance to next week so the window shows the next lunch to pick.
+          weekMonday = addDays(weekMonday, 7);
+          days = visibleDays();
+          ai = 0;
+        } else {
+          ai = 0; // a paged-to past/future week: start at its first day
+        }
+      }
+      return days.slice(ai, ai + fitCount(days.length - ai));
+    }
+    function renderWeekLabel(days) {
+      days = days || visibleDays();
       var first = days[0];
       var last = days[days.length - 1];
       $('weekLabel').textContent = first.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) +
@@ -449,7 +533,7 @@
     function renderTodayBox() {
       var box = $('todayBox');
       var tk = todayKey();
-      if (!state.people.length || !todayIsChoosable()) { box.classList.add('hidden'); return; }
+      if (!visiblePeople().length || !todayIsChoosable()) { box.classList.add('hidden'); return; }
       box.classList.remove('hidden');
       var html = '<h2>Today — ' + esc(fmtDay(new Date())) + '</h2>';
       visiblePeople().forEach(function (p) {
@@ -461,11 +545,12 @@
       box.innerHTML = html;
     }
     function renderWeek() {
-      renderWeekLabel();
+      var days = windowedDays();
+      renderWeekLabel(days);
       var banner = $('emptyBanner');
-      if (!state.people.length) {
+      if (!selectedPeople().length) {
         banner.classList.remove('hidden');
-        banner.innerHTML = 'No people yet. Add the people who choose lunch, then add lunch options.' +
+        banner.innerHTML = 'No lunch choosers yet. Select the household users who choose lunch in Manage.' +
           ' <button type="button" class="navbtn" id="bannerManage">Manage</button>';
         $('bannerManage').addEventListener('click', function () { setView('manage'); });
       } else if (!state.options.length) {
@@ -479,9 +564,9 @@
       }
       renderTodayBox();
       var tk = todayKey();
-      var days = visibleDays();
       var grid0 = $('dayGrid');
       grid0.className = 'daygrid cols' + days.length;
+      grid0.style.gridTemplateColumns = 'repeat(' + days.length + ', minmax(0, 1fr))';
       var html = '';
       for (var i = 0; i < days.length; i++) {
         var d = days[i];
@@ -514,16 +599,31 @@
     }
     function renderManage() {
       var pl = $('peopleList');
-      if (!state.people.length) {
-        pl.innerHTML = '<p class="hint">No people yet. Add the people who choose lunch.</p>';
+      var sel = selectedPeople();
+      var selIds = {};
+      sel.forEach(function (p) { selIds[p.userId] = true; });
+      if (usersError && !coreUsers.length) {
+        pl.innerHTML = '<p class="hint">⚠️ Couldn’t load the household users — reopen Manage to retry. Nothing here can be selected until they load.</p>';
+      } else if (!coreUsers.length) {
+        pl.innerHTML = '<p class="hint">Loading household users…</p>';
       } else {
-        pl.innerHTML = state.people.map(function (p) {
-          return '<div class="mrow"><span class="em">' + esc(p.emoji || '👤') + '</span>' +
-            '<span class="dot" style="background:' + esc(p.color || '#999') + '"></span>' +
-            '<span class="nm">' + esc(p.name) + '</span>' +
-            '<button type="button" class="smallbtn" data-edit-person="' + esc(p.id) + '">Edit</button>' +
-            '<button type="button" class="smallbtn danger" data-del-person="' + esc(p.id) + '">Delete</button></div>';
-        }).join('');
+        pl.innerHTML = '<p class="hint">Select the household users who choose lunch. There is no create-person form — the household list is the source.</p>' +
+          coreUsers.map(function (u) {
+            var p = userPerson(u);
+            var chosen = !!selIds[u.id];
+            return '<div class="mrow"><input type="checkbox" data-select-user="' + u.id + '"' + (chosen ? ' checked' : '') + '>' +
+              avatarHtml(p, 'avatar') + '<span class="nm">' + esc(u.username) + '</span></div>';
+          }).join('');
+        pl.querySelectorAll('[data-select-user]').forEach(function (cb) {
+          cb.addEventListener('change', function () {
+            var uid = parseInt(cb.getAttribute('data-select-user'), 10);
+            var ids = (state.selectedUserIds || []).slice();
+            if (cb.checked) { if (ids.indexOf(uid) === -1) ids.push(uid); }
+            else ids = ids.filter(function (x) { return x !== uid; });
+            state.selectedUserIds = ids;
+            save().then(function () { renderManage(); renderWeek(); });
+          });
+        });
       }
       var ol = $('optionsList');
       if (!state.options.length) {
@@ -545,12 +645,12 @@
         '<p class="hint">School lunches are Monday–Friday by default. This weekend setting is shared with every display.</p>' +
         '<h2>On this display</h2>' +
         '<p class="hint">Uncheck someone to hide them on this display only. Other displays are not affected. Checking everyone again shows everyone here (and you cannot hide everybody — clearing all resets to everyone).</p>';
-      if (!state.people.length) {
-        dhtml += '<p class="hint">Add people above first.</p>';
+      if (!sel.length) {
+        dhtml += '<p class="hint">Select users above first.</p>';
       } else {
-        state.people.forEach(function (p) {
+        sel.forEach(function (p) {
           var checked = !filter.length || filter.indexOf(p.id) !== -1;
-          dhtml += '<div class="mrow"><input type="checkbox" data-filter-person="' + esc(p.id) + '"' + (checked ? ' checked' : '') + '><span class="em">' + esc(p.emoji || '👤') + '</span><span class="flabel">' + esc(p.name) + '</span></div>';
+          dhtml += '<div class="mrow"><input type="checkbox" data-filter-person="' + esc(p.id) + '"' + (checked ? ' checked' : '') + '>' + avatarHtml(p, 'avatar') + '<span class="flabel">' + esc(p.name) + '</span></div>';
         });
       }
       dhtml += '<button type="button" class="addbtn" id="filterResetBtn">Show everyone on this display</button>';
@@ -563,7 +663,7 @@
         cb.addEventListener('change', function () {
           var checkedIds = [];
           ds.querySelectorAll('[data-filter-person]:checked').forEach(function (c) { checkedIds.push(c.getAttribute('data-filter-person')); });
-          if (checkedIds.length === state.people.length) saveFilter([]); else saveFilter(checkedIds);
+          if (checkedIds.length === sel.length) saveFilter([]); else saveFilter(checkedIds);
           renderWeek(); renderManage();
         });
       });
@@ -571,14 +671,8 @@
       bindManageButtons();
     }
     function bindManageButtons() {
-      document.querySelectorAll('[data-edit-person]').forEach(function (b) {
-        b.addEventListener('click', function () { openPersonDialog(b.getAttribute('data-edit-person')); });
-      });
       document.querySelectorAll('[data-edit-option]').forEach(function (b) {
         b.addEventListener('click', function () { openOptionDialog(b.getAttribute('data-edit-option')); });
-      });
-      document.querySelectorAll('[data-del-person]').forEach(function (b) {
-        b.addEventListener('click', function () { armDelete(b, 'person', b.getAttribute('data-del-person')); });
       });
       document.querySelectorAll('[data-del-option]').forEach(function (b) {
         b.addEventListener('click', function () { armDelete(b, 'option', b.getAttribute('data-del-option')); });
@@ -589,17 +683,12 @@
       if (armedDelete[key]) {
         clearTimeout(armedDelete[key]);
         delete armedDelete[key];
-        if (kind === 'person') {
-          state.people = state.people.filter(function (p) { return p.id !== id; });
-          Object.keys(state.choices || {}).forEach(function (dk) { delete state.choices[dk][id]; });
-        } else {
-          state.options = state.options.filter(function (o) { return o.id !== id; });
-          Object.keys(state.choices || {}).forEach(function (dk) {
-            Object.keys(state.choices[dk]).forEach(function (pid) {
-              if (state.choices[dk][pid] === id) delete state.choices[dk][pid];
-            });
+        state.options = state.options.filter(function (o) { return o.id !== id; });
+        Object.keys(state.choices || {}).forEach(function (dk) {
+          Object.keys(state.choices[dk]).forEach(function (pid) {
+            if (state.choices[dk][pid] === id) delete state.choices[dk][pid];
           });
-        }
+        });
         save().then(function () { renderManage(); renderWeek(); });
         return;
       }
@@ -616,7 +705,7 @@
       $('weekView').classList.toggle('hidden', v !== 'week');
       $('manageView').classList.toggle('hidden', v !== 'manage');
       $('manageBtn').textContent = v === 'manage' ? 'Week' : 'Manage';
-      if (v === 'manage') renderManage(); else renderWeek();
+      if (v === 'manage') { loadUsers().then(function () { renderManage(); }); renderManage(); } else renderWeek();
     }
     function renderAll() { if (view === 'manage') renderManage(); else renderWeek(); }
 
@@ -656,7 +745,7 @@
       });
     }
     function openChoiceDialog(key) {
-      if (!state.people.length || !state.options.length) { setView('manage'); return; }
+      if (!visiblePeople().length || !state.options.length) { setView('manage'); return; }
       dialogDateKey = key;
       var vis = visiblePeople();
       var withChoice = vis.filter(function (p) { return choiceFor(key, p.id); });
@@ -679,8 +768,8 @@
         b.className = 'personchip';
         b.setAttribute('aria-pressed', p.id === dialogPersonId ? 'true' : 'false');
         var has = !!choiceFor(key, p.id);
-        b.innerHTML = '<span class="dot" style="background:' + esc(p.color || '#999') + '"></span>' +
-          '<span>' + esc(p.emoji || '👤') + ' ' + esc(p.name) + (has ? ' ✓' : '') + '</span>';
+        b.innerHTML = avatarHtml(p, 'avatar') +
+          '<span>' + esc(p.name) + (has ? ' ✓' : '') + '</span>';
         b.addEventListener('click', function () { dialogPersonId = p.id; renderChoiceDialog(); });
         peopleEl.appendChild(b);
       });
@@ -705,20 +794,6 @@
         optsEl.appendChild(b);
       });
     }
-    function openPersonDialog(id) {
-      editingPersonId = id || null;
-      var p = id ? personById(id) : null;
-      $('personTitle').textContent = p ? 'Edit person' : 'Add person';
-      $('personName').value = p ? p.name : '';
-      $('personEmojiCustom').value = p ? (p.emoji || '') : '';
-      var cur = p ? (p.emoji || '👤') : '👤';
-      var col = p ? (p.color || COLORS[0]) : COLORS[0];
-      pickRow($('personEmojiPick'), FACE_EMOJI, cur, function (v) { $('personEmojiCustom').value = v; });
-      colorRow($('personColorPick'), col, function (c) { $('personColorPick').dataset.picked = c; });
-      $('personColorPick').dataset.picked = col;
-      openDialog($('personDialog'));
-      setTimeout(function () { $('personName').focus(); }, 50);
-    }
     function openOptionDialog(id) {
       editingOptionId = id || null;
       var o = id ? optionById(id) : null;
@@ -742,7 +817,6 @@
       $('todayBtn').addEventListener('click', function () { weekMonday = defaultWeekMonday(); renderWeek(); });
       $('manageBtn').addEventListener('click', function () { setView(view === 'manage' ? 'week' : 'manage'); });
       $('backBtn').addEventListener('click', function () { setView('week'); });
-      $('addPersonBtn').addEventListener('click', function () { openPersonDialog(null); });
       $('addOptionBtn').addEventListener('click', function () { openOptionDialog(null); });
       $('choiceDoneBtn').addEventListener('click', function () { closeDialog($('choiceDialog')); });
       $('choiceDialog').addEventListener('click', function (e) {
@@ -755,21 +829,6 @@
           save().then(function () { renderChoiceDialog(); renderWeek(); });
         }
       });
-      $('personSaveBtn').addEventListener('click', function () {
-        var name = $('personName').value.trim();
-        if (!name) { $('personName').focus(); return; }
-        var emoji = ($('personEmojiCustom').value.trim() || '👤').slice(0, 4);
-        var color = $('personColorPick').dataset.picked || COLORS[0];
-        if (editingPersonId) {
-          var p = personById(editingPersonId);
-          if (p) { p.name = name; p.emoji = emoji; p.color = color; }
-        } else {
-          state.people.push({ id: uid(), name: name, emoji: emoji, color: color });
-        }
-        save().then(function () { closeDialog($('personDialog')); });
-      });
-      $('personCancelBtn').addEventListener('click', function () { closeDialog($('personDialog')); });
-      $('personDialog').addEventListener('close', function () { dialogOpen = false; renderAll(); });
       $('optionSaveBtn').addEventListener('click', function () {
         var name = $('optionName').value.trim();
         if (!name) { $('optionName').focus(); return; }
@@ -810,6 +869,23 @@
         if (theme === 'dark' || theme === 'light') document.documentElement.setAttribute('data-theme', theme);
       } catch (e) {}
       bindStatic();
+      // Responsive week: re-render when the widget's width changes the
+      // day count. Only the count matters, so re-render only when it moves.
+      try {
+        if (typeof ResizeObserver === 'function') {
+          var lastCount = -1;
+          new ResizeObserver(function () {
+            if (!state) return;
+            var w = $('weekView') ? $('weekView').clientWidth : 0;
+            if (w && w !== containerWidth) {
+              containerWidth = w;
+              var total = visibleDays().length;
+              var c = fitCount(total);
+              if (c !== lastCount) { lastCount = c; if (state) renderWeek(); }
+            }
+          }).observe($('weekView'));
+        }
+      } catch (e) {}
       loadSettings().then(function () {
         return loadRemote();
       }).then(function (doc) {
@@ -822,6 +898,8 @@
           state = defaultState();
         }
         weekMonday = defaultWeekMonday();
+        return loadUsers();
+      }).then(function () {
         renderAll();
         pollTimer = setInterval(poll, Math.max(5, settings.pollSeconds) * 1000);
       }).catch(function () {

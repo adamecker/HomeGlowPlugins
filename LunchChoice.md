@@ -9,9 +9,16 @@ choice for the house.
 ## Use it
 
 - **Week view:** the current calendar week, Monday–Friday by default.
-  Each day card shows every person's choice (or a dash if they haven't
-  chosen). Tap a day to choose. Past days are shown greyed out and
-  can't be changed. Today is highlighted when it is visible.
+  Each day card shows every selected person's choice (or a dash if
+  they haven't chosen). Tap a day to choose. Past days are shown
+  greyed out and can't be changed. Today is highlighted when it is
+  visible. The week view fits its container: it starts at the next
+  lunch to pick (tomorrow, or the next school day when tomorrow is
+  not one) and shows as many days as fit — a small widget shows
+  only that next day, a large one shows the full week. When this
+  week's lunches are done (for example Friday with weekends hidden),
+  the view moves to next week, since that holds the next lunch to
+  pick.
 - **Week navigation:** ‹ and › move a week at a time; **Today** jumps
   back to the current week.
 - **Today box:** the top of the week view shows today's choices at a
@@ -30,10 +37,14 @@ choice for the house.
   dialog moves to the next person who hasn't chosen yet, if there is
   one. **Clear choice** removes the selected person's choice for that
   day. **Done** closes the dialog.
-- **Manage:** add, edit, and delete people and lunch options. Deleting
-  is two-tap (tap Delete, then Sure?). Deleting a person also removes
-  their choices; deleting an option clears it from any day it was
-  chosen on.
+- **Manage:** select the household users who choose lunch, and add,
+  edit, and delete lunch options. There is no create-person form:
+  Manage lists the household's HomeGlow users (read from the
+  household user list, which the plugin's frame token is allowed to
+  read) and parents check who chooses lunch. Deleting an option is
+  two-tap (tap Delete, then Sure?) and clears it from any day it was
+  chosen on. Unselecting a user hides them from the week view; their
+  past choices stay in the document but are not shown.
 
 ## One widget, or one kid per display
 
@@ -65,9 +76,10 @@ instances; the supported path is per-display filtering.
 
 ## Setup (parents)
 
-1. Open **Manage** and add the people who choose lunch: a name, a face
-   emoji, and a color. Nothing is pre-filled — the first run is empty
-   on purpose, so no example names ever look like real household data.
+1. Open **Manage** and select the household users who choose lunch.
+   The list comes from the household's HomeGlow users — add or
+   rename users in Admin, not here. Nothing is pre-selected: the
+   first run has nobody selected on purpose.
 2. Add lunch options: a name, a symbol emoji, a color, and optionally
    a picture URL (see below).
 3. If you pack weekend lunches too, turn on "Show Saturday and
@@ -107,25 +119,31 @@ Plugin storage key `data`:
 ```json
 {
   "version": 1,
-  "people": [{ "id": "...", "name": "...", "emoji": "🧒", "color": "#64b5f6" }],
+  "selectedUserIds": [1, 2],
   "options": [{ "id": "...", "name": "Sandwich", "emoji": "🥪", "color": "#ffb74d", "imageUrl": null }],
-  "choices": { "2026-10-29": { "<personId>": "<optionId>" } },
+  "choices": { "2026-10-29": { "u1": "<optionId>" } },
   "showWeekends": false,
   "updatedAt": "2026-10-28T00:00:00.000Z"
 }
 ```
 
-Dates are local `YYYY-MM-DD`. The widget polls storage (default every
+Choices are keyed by `"u" + <household user id>`. Dates are local
+`YYYY-MM-DD`. The widget polls storage (default every
 10 seconds, setting `pollSeconds`) so a choice made on one display
 appears on the others; a refresh is skipped while any dialog is open,
 and concurrent edits resolve last-write-wins.
 
 **Migration:** documents saved before the week-shape change have no
 `showWeekends` field and default to `false` (Monday–Friday), so
-existing choices, people, and options are untouched. The per-display
-people filter is not in this document at all — it lives in the
-display's localStorage shim under `homeglowLunchChoice.displayPeople`
-(an array of person ids; missing or empty means everyone).
+existing choices and options are untouched. Documents saved before
+the household-users change carry a legacy `people` array and choices
+keyed by custom person ids; those are preserved in the document
+untouched on save but are no longer rendered — the lunch set is now
+`selectedUserIds`, and choices render only for selected household
+users. The per-display people filter is not in this document at all
+— it lives in the display's localStorage shim under
+`homeglowLunchChoice.displayPeople` (an array of `"u" + <user id>`
+strings; missing or empty means everyone selected).
 
 ## What it doesn't do
 
