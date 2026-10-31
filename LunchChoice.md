@@ -80,8 +80,7 @@ instances; the supported path is per-display filtering.
    The list comes from the household's HomeGlow users — add or
    rename users in Admin, not here. Nothing is pre-selected: the
    first run has nobody selected on purpose.
-2. Add lunch options: a name, a symbol emoji, a color, and optionally
-   a picture URL (see below).
+2. Add lunch options: a name, a symbol emoji, and a color.
 3. If you pack weekend lunches too, turn on "Show Saturday and
    Sunday" in Manage. Otherwise leave it off — Monday–Friday is the
    default.
@@ -97,11 +96,6 @@ there for readers. Color helps too — give each option a distinct color
 and the choice is recognizable at a glance. Emoji + text is the v1
 answer, and it is enough.
 
-An option can also show a remote picture: put an `http(s)` picture URL
-in the option form and it renders instead of the emoji (with the emoji
-as fallback if the picture fails to load). Only `http(s)` links are
-accepted.
-
 Uploading a picture file from inside the widget is **not** supported
 in v1, and that is a platform limit, not an oversight: a plugin
 frame's token only covers its own plugin storage, settings, Home
@@ -109,8 +103,7 @@ Assistant, and notify routes (no plugin-scoped upload route or SDK
 upload method), and plugin storage caps each key at 64 KB, so full
 photos stored as data URLs would not fit a whole household document
 anyway. Real uploads would need a core change; no proposal is drafted
-here — emoji + text (plus an optional remote URL) is the supported
-path for now.
+here — emoji + text is the supported path for now.
 
 ## Data model
 
@@ -120,7 +113,7 @@ Plugin storage key `data`:
 {
   "version": 1,
   "selectedUserIds": [1, 2],
-  "options": [{ "id": "...", "name": "Sandwich", "emoji": "🥪", "color": "#ffb74d", "imageUrl": null }],
+  "options": [{ "id": "...", "name": "Sandwich", "emoji": "🥪", "color": "#ffb74d" }],
   "choices": { "2026-10-29": { "u1": "<optionId>" } },
   "showWeekends": false,
   "updatedAt": "2026-10-28T00:00:00.000Z"

@@ -22,10 +22,8 @@
     the code. First run starts with nobody selected — select users in
     Manage. Each option has a name plus an emoji and a color, so
     pre-readers can choose by picture-like symbol.
-    An option may also carry an imageUrl (a remote http(s) picture URL),
-    shown when set, with the emoji as fallback. There is no picture
-    upload in v1: plugin frames cannot reach an upload route (their
-    token only covers their own plugin storage/settings/ha/notify
+    Pictures are not supported: plugin frames cannot reach an upload
+    route (their token only covers their own plugin storage/settings/ha/notify
     routes, plus the documented read-only core routes), and the whole
     document must fit the 64 KB per-key storage cap, which rules out
     full photos as data URLs. See LunchChoice.md.
@@ -41,7 +39,7 @@
       HomeGlow.storage key "data", value:
         { version: 1,
           selectedUserIds: [ <core user id, number> ],
-          options: [ { id, name, emoji, color, imageUrl } ],
+          options: [ { id, name, emoji, color } ],  // older docs may carry imageUrl, now ignored
           choices: { "YYYY-MM-DD": { "u<userId>": "<optionId>" } },
           showWeekends: false,
           updatedAt: ISO timestamp }
@@ -163,7 +161,6 @@
     .personchip .avatar-fallback { font-size: 1.3rem; }
     .daychoice .avatar { width: 22px; height: 22px; object-fit: cover; border-radius: 50%; flex: none; }
     .daychoice .avatar-fallback { font-size: 1.1rem; }
-    .mrow .thumb { width: 40px; height: 40px; object-fit: cover; border-radius: 8px; flex: none; }
     .smallbtn {
       border: 1px solid var(--border, #ccc); border-radius: 8px; background: transparent;
       color: inherit; padding: 0.35rem 0.6rem; min-height: 40px;
@@ -204,7 +201,6 @@
     }
     .optbtn.chosen { outline: 3px solid var(--accent, #4a90d9); outline-offset: 1px; }
     .optbtn .em { font-size: 2.2rem; line-height: 1; }
-    .optbtn .otimg { width: 56px; height: 56px; object-fit: cover; border-radius: 10px; }
     .optbtn .nm { font-size: 0.85rem; font-weight: 600; text-align: center; overflow-wrap: anywhere; }
     .dlgfoot { display: flex; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap; }
     .dlgfoot .spacer { flex: 1; }
@@ -241,7 +237,6 @@
       <button type="button" class="addbtn" id="addOptionBtn">+ Add option</button>
       <h2>Week view</h2>
       <div id="displaySettings"></div>
-      <p class="hint">Pictures: an option can show a remote picture URL (see the form). Uploading pictures from inside the widget is not supported yet — emoji and color are the pre-reader-friendly choice for now.</p>
     </div>
 
     <div class="sync" id="syncLine" role="status"></div>
@@ -268,9 +263,6 @@
     <input type="text" id="optionEmojiCustom" maxlength="12" autocomplete="off" placeholder="🍽️">
     <label>Color</label>
     <div class="pickrow" id="optionColorPick"></div>
-    <label for="optionImageUrl">Picture URL (optional)</label>
-    <input type="url" id="optionImageUrl" maxlength="500" autocomplete="off" placeholder="https://…">
-    <p class="hint">A remote picture URL shows instead of the emoji. Only http(s) links are accepted. Uploading a picture file is not supported yet.</p>
     <div class="dlgfoot">
       <button type="button" class="navbtn" id="optionSaveBtn">Save</button>
       <button type="button" class="smallbtn" id="optionCancelBtn">Cancel</button>
@@ -404,9 +396,6 @@
       var day = (state.choices || {})[dateKeyStr] || {};
       return day[personId] || null;
     }
-    function validImageUrl(u) {
-      return typeof u === 'string' && /^https?:\/\//i.test(u.trim());
-    }
 
     // ---- storage: SDK first, localStorage fallback (standalone preview) ----
     function sdkOk() {
@@ -490,11 +479,7 @@
     function personLabel(p) {
       return avatarHtml(p, 'avatar') + '<span>' + esc(p.name) + '</span>';
     }
-    function optionVisual(o, cls) {
-      if (o.imageUrl && validImageUrl(o.imageUrl)) {
-        return '<img class="' + (cls || 'otimg') + '" src="' + esc(o.imageUrl) + '" alt="" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'inline\';">' +
-          '<span class="em" style="display:none">' + esc(o.emoji || '🍽️') + '</span>';
-      }
+    function optionVisual(o) {
       return '<span class="em">' + esc(o.emoji || '🍽️') + '</span>';
     }
     // ---- responsive week window (Part 2): the visible days start at
@@ -542,7 +527,7 @@
         var cid = choiceFor(tk, p.id);
         var o = cid ? optionById(cid) : null;
         html += '<div class="todayrow">' + personLabel(p) + '<span class="choice">' +
-          (o ? optionVisual(o, 'em') + ' ' + esc(o.name) : '<span class="none">Not chosen yet</span>') + '</span></div>';
+          (o ? optionVisual(o) + ' ' + esc(o.name) : '<span class="none">Not chosen yet</span>') + '</span></div>';
       });
       box.innerHTML = html;
     }
@@ -585,7 +570,7 @@
           var cid = choiceFor(key, p.id);
           var o = cid ? optionById(cid) : null;
           html += '<div class="daychoice">' + personLabel(p) +
-            (o ? '<span>' + optionVisual(o, 'em') + ' ' + esc(o.name) + '</span>' :
+            (o ? '<span>' + optionVisual(o) + ' ' + esc(o.name) + '</span>' :
               '<span class="none">—</span>') + '</div>';
         });
         html += '</button>';
@@ -632,9 +617,7 @@
         ol.innerHTML = '<p class="hint">No lunch options yet. Add the lunches parents pack.</p>';
       } else {
         ol.innerHTML = state.options.map(function (o) {
-          var thumb = (o.imageUrl && validImageUrl(o.imageUrl)) ?
-            '<img class="thumb" src="' + esc(o.imageUrl) + '" alt="" onerror="this.style.display=\'none\'">' : '';
-          return '<div class="mrow">' + thumb + '<span class="em">' + esc(o.emoji || '🍽️') + '</span>' +
+          return '<div class="mrow"><span class="em">' + esc(o.emoji || '🍽️') + '</span>' +
             '<span class="dot" style="background:' + esc(o.color || '#999') + '"></span>' +
             '<span class="nm">' + esc(o.name) + '</span>' +
             '<button type="button" class="smallbtn" data-edit-option="' + esc(o.id) + '">Edit</button>' +
@@ -782,7 +765,7 @@
         b.type = 'button';
         b.className = 'optbtn' + (choiceFor(key, dialogPersonId) === o.id ? ' chosen' : '');
         b.style.borderColor = o.color || '';
-        b.innerHTML = optionVisual(o, 'otimg') + '<span class="nm">' + esc(o.name) + '</span>';
+        b.innerHTML = optionVisual(o) + '<span class="nm">' + esc(o.name) + '</span>';
         b.addEventListener('click', function () {
           if (!state.choices[key]) state.choices[key] = {};
           state.choices[key][dialogPersonId] = o.id;
@@ -802,7 +785,6 @@
       $('optionTitle').textContent = o ? 'Edit option' : 'Add option';
       $('optionName').value = o ? o.name : '';
       $('optionEmojiCustom').value = o ? (o.emoji || '') : '';
-      $('optionImageUrl').value = o ? (o.imageUrl || '') : '';
       var cur = o ? (o.emoji || '🍽️') : '🍽️';
       var col = o ? (o.color || COLORS[0]) : COLORS[0];
       pickRow($('optionEmojiPick'), FOOD_EMOJI, cur, function (v) { $('optionEmojiCustom').value = v; });
@@ -836,16 +818,10 @@
         if (!name) { $('optionName').focus(); return; }
         var emoji = ($('optionEmojiCustom').value.trim() || '🍽️').slice(0, 4);
         var color = $('optionColorPick').dataset.picked || COLORS[0];
-        var img = $('optionImageUrl').value.trim();
-        if (img && !validImageUrl(img)) {
-          setSync('⚠️ Picture URL must start with http:// or https://.', true);
-          $('optionImageUrl').focus();
-          return;
-        }
-        var data = { name: name, emoji: emoji, color: color, imageUrl: img || null };
+        var data = { name: name, emoji: emoji, color: color };
         if (editingOptionId) {
           var o = optionById(editingOptionId);
-          if (o) { o.name = data.name; o.emoji = data.emoji; o.color = data.color; o.imageUrl = data.imageUrl; }
+          if (o) { o.name = data.name; o.emoji = data.emoji; o.color = data.color; }
         } else {
           state.options.push(Object.assign({ id: uid() }, data));
         }
