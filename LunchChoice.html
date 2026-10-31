@@ -712,7 +712,11 @@
         b.className = 'pickbtn';
         b.textContent = v;
         b.setAttribute('aria-pressed', v === current ? 'true' : 'false');
-        b.addEventListener('click', function () { onPick(v); });
+        b.addEventListener('click', function () {
+          Array.prototype.forEach.call(el.children, function (x) { x.setAttribute('aria-pressed', 'false'); });
+          b.setAttribute('aria-pressed', 'true');
+          onPick(v);
+        });
         el.appendChild(b);
       });
     }
@@ -725,7 +729,11 @@
         b.style.background = c;
         b.setAttribute('aria-label', 'Color ' + c);
         b.setAttribute('aria-pressed', c === current ? 'true' : 'false');
-        b.addEventListener('click', function () { onPick(c); });
+        b.addEventListener('click', function () {
+          Array.prototype.forEach.call(el.children, function (x) { x.setAttribute('aria-pressed', 'false'); });
+          b.setAttribute('aria-pressed', 'true');
+          onPick(c);
+        });
         el.appendChild(b);
       });
     }
