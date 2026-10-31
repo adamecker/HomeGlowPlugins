@@ -32,15 +32,18 @@ section picker in the item's edit dialog.
   headers, in store-walk order; when it is off, the list shows flat
   in its current order. The toggle is saved with the list.
 - **Entry order** is the default sort: items show in the order they
-  were added, or the order drag-reorder left them in.
+  were added, or the order Rearrange left them in.
   A–Z and Recently added are also available; when grouping is on,
   they apply within each section.
-- **Drag to reorder** (Manage view): grab the ⋮⋮ handle on a row to
-  move it. Dropping within a section reorders within it; dropping on
-  a row in another section (grouped view only) moves the item into
-  that section. Drops in a flat list reorder only. Dragging is
-  undoable. (Touch displays do not support HTML5 drag; use the
-  section picker in the edit dialog to re-section an item there.)
+- **Rearrange** (Manage view): tap Rearrange for ↑ / ↓ buttons on
+  every row — the way to reorder, on touch and mouse alike.
+  ↑ moves the item one step up, ↓ one step down —
+  within its section when Group by section is on, across the
+  whole list when it is off. Moves save immediately; there is
+  no undo. While rearranging, the sort is entry order so the
+  rows on screen are the order being edited; tap Done to leave
+  rearrange mode. Moving an item to another section stays on the
+  section picker in the edit dialog.
 
 Custom lists have no sections: they sort
 by entry order, A–Z, or Recently added.
@@ -87,6 +90,9 @@ These controls live in Manage view; Simple view has none of them.
 
 - **Search** covers item names, categories, and stores.
 - **Sort** by entry order (the default), A–Z, or recently added.
+  Entry order shows the list's own order; Recently added shows
+  newest first by creation time — the reverse of entry order when
+  nothing was ever reordered, and different from it otherwise.
 - **Store filter** lists only the stores already used on that list.
   Stores are freeform tags you type yourself — there is no preset
   retailer list, and a store typed once becomes
@@ -122,7 +128,7 @@ Manage is a separate view reached from the widget's settings gear.
   headers too, compact.
 - **Manage view**: the full UI described above — all header controls,
   the full add/edit dialog (every field per template), bulk add,
-  the Group-by-section toggle, drag handles, rename,
+  the Group-by-section toggle, Rearrange mode, rename,
   sort, filters, and delete flows. The header button becomes
   a back arrow (⬅️) that returns to Simple.
 

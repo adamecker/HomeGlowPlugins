@@ -10,7 +10,7 @@
     fields the UI shows, but every list shares the same core: add, check,
     uncheck, and (in Manage view) uncheck all,
     search, sort, filter, bulk add, rename lists,
-    and drag-to-reorder.
+    and a Rearrange mode with ↑/↓ buttons.
     Checked items are never deleted in bulk: an item disappears only
     when it is picked for removal (its ✕, tapped twice) or its whole
     list is deleted. There is deliberately no undo — every removal is
@@ -191,9 +191,11 @@
     .iactions { margin-left: auto; display: flex; gap: 0.3rem; flex-shrink: 0; }
     .iconbtn { background: transparent; border: none; color: inherit; opacity: 0.7; font-size: 0.95rem; padding: 0.45rem 0.6rem; }
     .iconbtn:hover { opacity: 1; }
-    .draghandle { cursor: grab; opacity: 0.55; font-size: 1rem; padding: 0.45rem 0.1rem; align-self: center; flex-shrink: 0; user-select: none; }
-    .draghandle:active { cursor: grabbing; }
-    .item.droptarget { outline: 2px dashed var(--accent, #00a8b5); }
+    /* Rearrange mode: ↑/↓ buttons with
+       proper touch-sized targets — the single reorder mechanism. */
+    .reorder { display: flex; gap: 0.3rem; flex-shrink: 0; align-self: center; }
+    .moveBtn { min-width: 44px; min-height: 44px; padding: 0.3rem; font-size: 1.15rem; line-height: 1; background: rgba(255,255,255,0.1); border: 1px solid var(--border, rgba(128,128,128,0.35)); border-radius: 8px; color: inherit; cursor: pointer; }
+    .moveBtn:disabled { opacity: 0.35; cursor: default; }
     .empty { text-align: center; opacity: 0.7; padding: 1.25rem 0.5rem; font-size: 0.9rem; }
     .small { font-size: 0.78rem; opacity: 0.8; }
     .hidden { display: none !important; }
@@ -332,6 +334,7 @@
       </select>
       <label class="small"><input type="checkbox" id="showChecked" checked> Show checked</label>
       <button class="btn" id="uncheckAllBtn" type="button">Uncheck all</button>
+      <button class="btn" id="rearrangeBtn" type="button" aria-pressed="false">Rearrange</button>
       <button class="btn danger" id="deleteListBtn" type="button">Delete this list</button>
       <label class="small" id="groupLabel"><input type="checkbox" id="groupSections"> Group by section</label>
     </div>
@@ -446,7 +449,7 @@
     var recoveryPending = false; // boot storage read failed: never write the in-memory default remotely
     var saveWarned = false;      // a save-failure warning is showing
     var pollTimer = null;
-    var draggedId = null;   // item id mid-drag (Manage reorder)
+    var rearrangeMode = false; // Manage reorder via ↑/↓ buttons
 
     function uid() { return 'i' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
     function nowIso() { return new Date().toISOString(); }
@@ -607,6 +610,28 @@
       if (it.store) parts.push('📍 ' + it.store);
       return parts.join(' · ');
     }
+    // Rearrange mode: move an item one step
+    // within its rendered chunk — within its section when grouped,
+    // globally when flat. The move is applied to list.items adjacent
+    // to the neighbouring visible item, then saved immediately.
+    // Cross-section moves stay on the section picker (the category
+    // is never changed here). Sort is forced to
+    // entry while rearranging, so the rows on screen are the order
+    // being edited.
+    function moveItemInChunk(list, it, dir, chunk) {
+      if (!chunk) return false;
+      var idx = chunk.indexOf(it);
+      if (idx < 0) return false;
+      var ni = idx + dir;
+      if (ni < 0 || ni >= chunk.length) return false;
+      var neighbor = chunk[ni];
+      var from = list.items.indexOf(it);
+      list.items.splice(from, 1);
+      var to = list.items.indexOf(neighbor);
+      if (dir > 0) to += 1;
+      list.items.splice(to, 0, it);
+      return true;
+    }
     function renderItems() {
       var list = activeList(); if (!list) return;
       // Simple ignores every management control (they are hidden, so a
@@ -623,7 +648,7 @@
       if (storeF) items = items.filter(function (i) { return i.store === storeF; });
       if (!showChecked) items = items.filter(function (i) { return !i.checked; });
       // Entry order is the list's own order (the order items were added,
-      // or the order drag-reorder left them in). A–Z and
+      // or the order Rearrange left them in). A–Z and
       // Recently added apply within each section when grouped, globally
       // when flat. There is no category sort anymore: section order is
       // what the Group-by-section toggle is for.
@@ -634,7 +659,7 @@
       }
       var box = $('items'); box.innerHTML = '';
       if (!items.length) { box.innerHTML = '<div class="empty">' + (list.items.length ? 'Nothing matches those filters.' : (isSimple ? 'Nothing here yet — tap + Add to get started.' : 'Nothing here yet — tap + Add item to get started.')) + '</div>'; return; }
-      function renderRow(it) {
+      function renderRow(it, chunk) {
         var row = document.createElement('div'); row.className = 'item' + (it.checked ? ' checked' : '');
         var cb = document.createElement('button');
         cb.className = 'check' + (it.checked ? ' on' : ''); cb.type = 'button';
@@ -648,37 +673,24 @@
         mid.appendChild(nm); if (mt.textContent) mid.appendChild(mt);
         row.appendChild(cb); row.appendChild(mid);
         if (it.store) { var pill = document.createElement('span'); pill.className = 'storepill'; pill.textContent = it.store; row.appendChild(pill); }
-        // Manage rows carry a drag handle for manual ordering, plus the
-        // drop targets. Dragging within a section reorders within it;
-        // dropping on a row in another section (grouped view only)
-        // moves the item into that section. Flat-view drops reorder
-        // only. Touch displays have no HTML5 drag: the section picker
-        // in the edit dialog covers re-sectioning there.
-        if (!isSimple) {
-          var dh = document.createElement('span'); dh.className = 'draghandle'; dh.textContent = '⋮⋮'; dh.title = 'Drag to reorder'; dh.draggable = true;
-          dh.addEventListener('dragstart', function (e) { draggedId = it.id; try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', it.id); } catch (err) {} });
-          dh.addEventListener('dragend', function () { draggedId = null; var marked = document.querySelectorAll('.droptarget'); for (var k = 0; k < marked.length; k++) marked[k].classList.remove('droptarget'); });
-          row.insertBefore(dh, row.firstChild);
-          row.addEventListener('dragover', function (e) { if (!draggedId || draggedId === it.id) return; e.preventDefault(); try { e.dataTransfer.dropEffect = 'move'; } catch (err) {} row.classList.add('droptarget'); });
-          row.addEventListener('dragleave', function () { row.classList.remove('droptarget'); });
-          row.addEventListener('drop', function (e) {
-            e.preventDefault(); row.classList.remove('droptarget');
-            if (!draggedId || draggedId === it.id) return;
-            var d = null; list.items.forEach(function (x) { if (x.id === draggedId) d = x; });
-            if (!d) return;
-            // Midpoint test: drop after the row when the pointer is in
-            // its lower half.
-            var rect = row.getBoundingClientRect();
-            var dropAfter = e.clientY > rect.top + rect.height / 2;
-            if (grouped && list.type === 'grocery') d.category = sectionOf(list, it);
-            var from = list.items.indexOf(d);
-            list.items.splice(from, 1);
-            var to = list.items.indexOf(it);
-            if (dropAfter) to += 1;
-            list.items.splice(to, 0, d);
-            draggedId = null;
-            save().then(render);
-          });
+        // Rearrange mode: ↑ moves the item
+        // one step up, ↓ one step down, within its rendered chunk —
+        // within its section when grouped, globally when flat.
+        // Buttons at the chunk boundaries are disabled. Moves save
+        // immediately.
+        if (!isSimple && rearrangeMode) {
+          var ro = document.createElement('div'); ro.className = 'reorder';
+          var up = document.createElement('button'); up.className = 'moveBtn'; up.type = 'button'; up.textContent = '↑';
+          up.setAttribute('aria-label', 'Move ' + it.name + ' up');
+          var down = document.createElement('button'); down.className = 'moveBtn'; down.type = 'button'; down.textContent = '↓';
+          down.setAttribute('aria-label', 'Move ' + it.name + ' down');
+          var ci = chunk ? chunk.indexOf(it) : -1;
+          up.disabled = ci <= 0;
+          down.disabled = ci < 0 || ci >= chunk.length - 1;
+          up.onclick = function () { if (moveItemInChunk(list, it, -1, chunk)) save().then(render); };
+          down.onclick = function () { if (moveItemInChunk(list, it, 1, chunk)) save().then(render); };
+          ro.appendChild(up); ro.appendChild(down);
+          row.appendChild(ro);
         }
         // Simple has no per-item edit/remove: rows are for checking off
         // only. (Manage builds the same actions block below.)
@@ -711,10 +723,11 @@
           var chunk = sortChunk(items.filter(function (i) { return sectionOf(list, i) === sec; }));
           if (!chunk.length) return;
           var h = document.createElement('div'); h.className = 'grouphead'; h.textContent = sec; box.appendChild(h);
-          chunk.forEach(renderRow);
+          chunk.forEach(function (x) { renderRow(x, chunk); });
         });
       } else {
-        sortChunk(items).forEach(renderRow);
+        var flat = sortChunk(items);
+        flat.forEach(function (x) { renderRow(x, flat); });
       }
     }
     function maybeCelebrate(list) {
@@ -926,6 +939,12 @@
     function setView(view) {
       applyView(view);
       resetConfirms(); cancelRename();
+      if (view === 'simple' && rearrangeMode) {
+        rearrangeMode = false;
+        $('sortSel').disabled = false;
+        $('rearrangeBtn').textContent = 'Rearrange';
+        $('rearrangeBtn').setAttribute('aria-pressed', 'false');
+      }
       render();
     }
     $('settingsBtn').onclick = function () { setView(currentView === 'simple' ? 'manage' : 'simple'); };
@@ -943,6 +962,25 @@
       if (!list.items.some(function (i) { return i.checked; })) return;
       list.items.forEach(function (i) { i.checked = false; i.checkedAt = null; });
       save().then(render);
+    };
+    // Rearrange mode: the toolbar button
+    // toggles ↑/↓ buttons on every Manage row. While rearranging,
+    // the sort is forced to entry order (and the sort control
+    // locked) so the rows on screen are the order being edited.
+    $('rearrangeBtn').onclick = function () {
+      if (!activeList()) return;
+      rearrangeMode = !rearrangeMode;
+      if (rearrangeMode) {
+        $('sortSel').value = 'entry';
+        $('sortSel').disabled = true;
+        $('rearrangeBtn').textContent = 'Done';
+        $('rearrangeBtn').setAttribute('aria-pressed', 'true');
+      } else {
+        $('sortSel').disabled = false;
+        $('rearrangeBtn').textContent = 'Rearrange';
+        $('rearrangeBtn').setAttribute('aria-pressed', 'false');
+      }
+      render();
     };
     $('deleteListBtn').onclick = function () {
       if (state.lists.length <= 1) { setStatus('You need at least one list.'); setTimeout(function () { setStatus(''); }, 3000); return; }
