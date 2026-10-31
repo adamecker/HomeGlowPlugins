@@ -228,8 +228,11 @@
     .simple .grouphead { margin: 0.5rem 0 0.5rem 0; }
     /* In Simple the tabs row is the last header element before the
        items (Manage's control rows are hidden), so it needs its own
-       breathing room below or the first item touches the tabs. */
-    .simple #tabsRow { margin-bottom: 0.5rem; }
+       breathing room below or the first item touches the tabs — and
+       above, or the + Add button sits flush on the list tabs: with
+       the subtitle hidden, the title row ends exactly where the tabs
+       begin. */
+    .simple #tabsRow { margin: 0.5rem 0; }
     .simple #manageBtnRow:has(#statusLine:not(:empty)) { display: flex !important; }
     .simple .item { padding: 0.4rem 0.6rem; margin-bottom: 0.3rem; }
     .simple .iname { font-size: 1rem; }
