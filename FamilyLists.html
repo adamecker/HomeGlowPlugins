@@ -8,22 +8,26 @@
 
     One widget, many list types. A list has a `type` that controls which
     fields the UI shows, but every list shares the same core: add, check,
-    uncheck, undo, and (in Manage view) uncheck all, delete checked
-    items, search, sort, filter, bulk add, export, rename lists,
+    uncheck, and (in Manage view) uncheck all,
+    search, sort, filter, bulk add, rename lists,
     and drag-to-reorder.
+    Checked items are never deleted in bulk: an item disappears only
+    when it is picked for removal (its ✕, tapped twice) or its whole
+    list is deleted. There is deliberately no undo — every removal is
+    an explicit two-tap act.
     The widget has two views. The dashboard widget is always Simple:
     a title row — title on the left, + Add and a settings gear
-    upper right (in Manage view the gear becomes a back chevron) —
+    upper right (in Manage view the gear becomes a back arrow) —
     with the list tabs on their own row below, and
     condensed rows with
-    working checkboxes — no management controls, and neither a
-    progress bar nor stats at any width. The title is always plain
+    working checkboxes — no management controls, and no item counts
+    anywhere (no stats row, no progress bar, no count in the
+    subtitle). The title is always plain
     "Family Lists" — never an emoji. The grocery list's own tab
     carries the 🛒 cart emoji after its name ("Groceries 🛒");
     custom tabs show just the name, with no type suffix anywhere.
-    (total, checked) live in Manage view only.
     Manage is today's full
-    UI; its header button is a back chevron that switches back to
+    UI; its header button is a back arrow that switches back to
     Simple. A fresh load
     always renders Simple; only a URL ?view=manage or ?view=simple
     param wins for that load. Manage is entered from the widget's
@@ -138,6 +142,7 @@
     .btn.primary { background: var(--accent, #00a8b5); color: #fff; border-color: transparent; }
     .btn.danger { color: #e5484d; }
     input, select, textarea {
+      box-sizing: border-box; min-width: 0;
       font-family: inherit; font-size: 0.9rem; color: inherit;
       background: rgba(255,255,255,0.08);
       border: 1px solid var(--border, rgba(128,128,128,0.35));
@@ -153,13 +158,13 @@
       border-radius: 12px; padding: 0.75rem; margin-bottom: 0.75rem;
     }
     [data-theme="dark"] .card { background: rgba(30,30,50,0.25); }
-    .stats { display: flex; gap: 1rem; font-size: 0.8rem; opacity: 0.85; margin: 0.25rem 0 0.75rem 0; flex-wrap: wrap; }
-    .stats b { font-size: 1rem; }
-    .progress { height: 8px; border-radius: 999px; background: rgba(128,128,128,0.25); overflow: hidden; margin: 0.5rem 0; }
-    .progress > div { height: 100%; background: var(--accent, #00a8b5); width: 0%; transition: width 0.3s; }
-    .addgrid { display: grid; grid-template-columns: 2fr 0.7fr 1fr 1fr; gap: 0.5rem; margin-bottom: 0.5rem; }
+    /* Edit dialog must never shift off-screen on narrow phones: the
+       grid tracks allow shrinking below item min-content (long unit
+       prompts, default input widths), fields shrink inside their
+       tracks, and the dialog's own width includes its padding. */
+    .addgrid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 0.7fr) minmax(0, 1fr) minmax(0, 1fr); gap: 0.5rem; margin-bottom: 0.5rem; }
     .addgrid .wide { grid-column: span 2; }
-    @media (max-width: 560px) { .addgrid { grid-template-columns: 1fr 1fr; } .addgrid .wide { grid-column: span 2; } }
+    @media (max-width: 560px) { .addgrid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .addgrid .wide { grid-column: span 2; } }
     .toolbar { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 0.5rem 0; align-items: center; }
     .toolbar input[type="search"] { flex: 1; min-width: 140px; }
     .grouphead {
@@ -190,12 +195,11 @@
     .draghandle:active { cursor: grabbing; }
     .item.droptarget { outline: 2px dashed var(--accent, #00a8b5); }
     .empty { text-align: center; opacity: 0.7; padding: 1.25rem 0.5rem; font-size: 0.9rem; }
-    #undoBar { display: flex; gap: 0.5rem; align-items: center; background: #fff3cd; color: #333; border-radius: 8px; padding: 0.5rem 0.75rem; margin: 0.5rem 0; }
     .small { font-size: 0.78rem; opacity: 0.8; }
     .hidden { display: none !important; }
     /* Add dialog: creation and editing live behind one + button, not a
        permanent field grid. Native <dialog> gives backdrop + Esc. */
-    dialog#addDialog { border: 1px solid var(--border, rgba(128,128,128,0.35)); border-radius: 12px; padding: 1rem; width: calc(100% - 2rem); max-width: 560px; background: rgba(255,255,255,0.98); color: #333; }
+    dialog#addDialog { box-sizing: border-box; border: 1px solid var(--border, rgba(128,128,128,0.35)); border-radius: 12px; padding: 1rem; width: calc(100% - 2rem); max-width: 560px; background: rgba(255,255,255,0.98); color: #333; }
     [data-theme="dark"] dialog#addDialog { background: rgba(30,30,50,0.98); color: var(--text, #d6d6e8); }
     dialog#addDialog::backdrop { background: rgba(0,0,0,0.45); }
     /* Store pill: hidden in Manage view (store already shows in the
@@ -203,22 +207,20 @@
     .storepill { display: none; }
     /* Simple view: the dashboard widget, always. Header is two rows —
        title row (title left, + Add and the settings gear upper right;
-       in Manage view the gear is a back chevron to Simple)
+       in Manage view the gear is a back arrow to Simple)
        plus the tabs row below; the list is condensed single-line rows with
        working checkboxes and a store pill. Every management control
        hides here (it lives in Manage view); the full add dialog's
        extra fields and bulk add hide too, leaving
-       quick-add. The stats row and the progress bar hide here too,
-       at every width — neither is useful on the dashboard widget;
-       both live in Manage view only. Hiding the whole meta card
-       (not just its children) leaves no empty card behind. The
+       quick-add. There is no stats row or progress bar anywhere —
+       item counts were removed as not useful. The
        Manage button row hides too, so Simple adds no second row —
        except while a status message is showing, so a save warning still
        surfaces. Manage is entered from the settings gear. */
     .simple .toolbar,
-    .simple #newListBtn, .simple #renameListBtn, .simple #copyBtn, .simple #renameRow, .simple #manageBtnRow,
+    .simple #newListBtn, .simple #renameListBtn, .simple #renameRow, .simple #manageBtnRow,
     .simple #newListCard,
-    .simple #subtitle, .simple .stat-checked,
+    .simple #subtitle,
     .simple .imeta, .simple #footNote,
     .simple .iactions,
     .simple #addDialog details { display: none !important; }
@@ -228,9 +230,7 @@
        items (Manage's control rows are hidden), so it needs its own
        breathing room below or the first item touches the tabs. */
     .simple #tabsRow { margin-bottom: 0.5rem; }
-    .simple #metaCard { display: none !important; }
     .simple #manageBtnRow:has(#statusLine:not(:empty)) { display: flex !important; }
-    .simple .stats { font-size: 0.95rem; display: none; }
     .simple .item { padding: 0.4rem 0.6rem; margin-bottom: 0.3rem; }
     .simple .iname { font-size: 1rem; }
     .simple .storepill { display: inline-block; align-self: center; flex-shrink: 0; font-size: 0.72rem; font-weight: 700; padding: 0.2rem 0.55rem; border-radius: 999px; background: rgba(0,168,181,0.18); }
@@ -268,7 +268,6 @@
     <div class="row" id="manageBtnRow" style="margin-top:0.5rem;">
       <button class="btn" id="newListBtn" type="button">+ New list</button>
       <button class="btn" id="renameListBtn" type="button">✎ Rename list</button>
-      <button class="btn" id="copyBtn" type="button">📋 Copy list</button>
       <span class="small" id="statusLine" aria-live="polite"></span>
     </div>
 
@@ -288,11 +287,6 @@
         <button class="btn primary" id="createListBtn" type="button">Create</button>
         <button class="btn" id="cancelListBtn" type="button">Cancel</button>
       </div>
-    </div>
-
-    <div class="card" id="metaCard">
-      <div class="stats" id="stats"></div>
-      <div class="progress" id="progressWrap" role="progressbar" aria-label="List progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="progressBar"></div></div>
     </div>
 
     <dialog id="addDialog" aria-label="Add or edit item">
@@ -335,12 +329,9 @@
       </select>
       <label class="small"><input type="checkbox" id="showChecked" checked> Show checked</label>
       <button class="btn" id="uncheckAllBtn" type="button">Uncheck all</button>
-      <button class="btn" id="deleteCheckedBtn" type="button">Delete checked items</button>
       <button class="btn danger" id="deleteListBtn" type="button">Delete this list</button>
       <label class="small" id="groupLabel"><input type="checkbox" id="groupSections"> Group by section</label>
     </div>
-
-    <div id="undoBar" class="hidden" aria-live="polite"><span id="undoMsg"></span><button class="btn primary" id="undoBtn" type="button">↩ Undo</button></div>
 
     <div id="items"></div>
 
@@ -446,12 +437,9 @@
     var settings = { pollSeconds: 10 };
     var editingId = null;       // item id being inline-edited
     var dirty = false;          // add form / edit in progress -> skip poll
-    var confirmDeleteCheckedUntil = 0;  // inline two-tap confirm for Delete checked items
     var confirmDeleteUntil = 0; // inline two-tap confirm for Delete list
     var confirmRemoveId = null; // item id awaiting two-tap remove confirm
     var confirmRemoveUntil = 0;
-    var undoSnapshot = null;   // deep copy of state.lists before the last change (single-level undo)
-    var undoTimer = null;      // auto-hide for the undo bar
     var recoveryPending = false; // boot storage read failed: never write the in-memory default remotely
     var saveWarned = false;      // a save-failure warning is showing
     var pollTimer = null;
@@ -558,14 +546,10 @@
     }
     function renderMeta() {
       var list = activeList(); if (!list) return;
-      var items = list.items;
-      var done = items.filter(function (i) { return i.checked; }).length;
-      var total = items.length;
-      $('subtitle').textContent = templateOf(list).label + ' list · ' + total + ' item' + (total === 1 ? '' : 's');
-      $('stats').innerHTML = '<span class="stat-total"><b>' + total + '</b> item' + (total === 1 ? '' : 's') + '</span><span class="stat-checked"><b>' + done + '</b> checked</span>';
-      var pct = total ? Math.round(done / total * 100) : 0;
-      $('progressBar').style.width = pct + '%';
-      $('progressWrap').setAttribute('aria-valuenow', String(pct));
+      // The subtitle names the list type only — item counts (total and
+      // checked) were removed as not useful, along with the stats row
+      // and progress bar.
+      $('subtitle').textContent = templateOf(list).label + ' list';
       // Category datalist for custom lists: categories already used on
       // this list. (Grocery lists use the fixed section picker instead.)
       var cl = $('catList'); cl.innerHTML = '';
@@ -653,7 +637,7 @@
         cb.className = 'check' + (it.checked ? ' on' : ''); cb.type = 'button';
         cb.setAttribute('aria-label', (it.checked ? 'Uncheck ' : 'Check ') + it.name);
         cb.textContent = it.checked ? '✓' : '';
-        cb.onclick = function () { pushUndo(it.checked ? 'Item unchecked' : 'Item checked'); it.checked = !it.checked; it.checkedAt = it.checked ? nowIso() : null; maybeCelebrate(list); save().then(render); };
+        cb.onclick = function () { it.checked = !it.checked; it.checkedAt = it.checked ? nowIso() : null; maybeCelebrate(list); save().then(render); };
         var mid = document.createElement('div'); mid.style.flex = '1'; mid.style.minWidth = '0';
         var qtyPrefix = (it.qty != null) ? it.qty + (it.unit ? ' ' + it.unit : '') + ' ' : '';
         var nm = document.createElement('div'); nm.className = 'iname'; nm.textContent = qtyPrefix + it.name;
@@ -679,13 +663,10 @@
             if (!draggedId || draggedId === it.id) return;
             var d = null; list.items.forEach(function (x) { if (x.id === draggedId) d = x; });
             if (!d) return;
-            // Measure the drop position BEFORE pushUndo: showing the
-            // undo bar inserts a row above the items, which shifts
-            // every row rect down and would corrupt the midpoint test
-            // (a lower-half drop would read as upper-half).
+            // Midpoint test: drop after the row when the pointer is in
+            // its lower half.
             var rect = row.getBoundingClientRect();
             var dropAfter = e.clientY > rect.top + rect.height / 2;
-            pushUndo('Items reordered');
             if (grouped && list.type === 'grocery') d.category = sectionOf(list, it);
             var from = list.items.indexOf(d);
             list.items.splice(from, 1);
@@ -710,7 +691,6 @@
         db.onclick = function () {
           if (confirmRemoveId === it.id && Date.now() < confirmRemoveUntil) {
             confirmRemoveId = null; confirmRemoveUntil = 0;
-            pushUndo('Item removed');
             list.items = list.items.filter(function (x) { return x.id !== it.id; }); save().then(render);
           } else {
             confirmRemoveId = it.id; confirmRemoveUntil = Date.now() + 4000;
@@ -774,9 +754,8 @@
     // them — otherwise an armed confirm could delete from a list that
     // was never armed.
     function resetConfirms() {
-      confirmDeleteCheckedUntil = 0; confirmDeleteUntil = 0;
+      confirmDeleteUntil = 0;
       confirmRemoveId = null; confirmRemoveUntil = 0;
-      $('deleteCheckedBtn').textContent = 'Delete checked items';
       $('deleteListBtn').textContent = 'Delete this list';
     }
     // Rename is inline (no prompt()/alert() — modal dialogs are blocked
@@ -803,7 +782,6 @@
       if (!list) { cancelRename(); return; }
       var name = $('renameInput').value.trim();
       if (name && name !== list.name) {
-        pushUndo('List renamed');
         list.name = name;
         save().then(render);
       }
@@ -827,26 +805,6 @@
     }
     function setStatus(msg) { $('statusLine').textContent = msg || ''; }
 
-    // ---- undo: single-level, last change only, 8s window ----
-    // The bar is the whole affordance: every mutation below snapshots first,
-    // so Undo restores the list to before that change. Like any other edit
-    // here it is last-write-wins against other displays.
-    function pushUndo(label) {
-      try { undoSnapshot = { lists: JSON.parse(JSON.stringify(state.lists)), activeListId: activeListId }; } catch (e) { undoSnapshot = null; }
-      $('undoMsg').textContent = label + '.';
-      $('undoBar').classList.remove('hidden');
-      if (undoTimer) clearTimeout(undoTimer);
-      undoTimer = setTimeout(function () { undoSnapshot = null; $('undoBar').classList.add('hidden'); }, 8000);
-    }
-    function doUndo() {
-      if (!undoSnapshot) return;
-      if (undoTimer) { clearTimeout(undoTimer); undoTimer = null; }
-      try { state.lists = JSON.parse(JSON.stringify(undoSnapshot.lists)); } catch (e) { return; }
-      activeListId = state.lists.filter(function (l) { return l.id === undoSnapshot.activeListId; })[0] ? undoSnapshot.activeListId : (state.lists[0] ? state.lists[0].id : null);
-      undoSnapshot = null; $('undoBar').classList.add('hidden');
-      save().then(render);
-    }
-
     // ---- wiring ----
     $('addForm').addEventListener('submit', function (e) {
       e.preventDefault();
@@ -864,7 +822,6 @@
       } else {
         partial = { name: name, qty: null, category: $('fCategory').value.trim() };
       }
-      pushUndo(editingId && currentView !== 'simple' ? 'Item edited' : 'Item added');
       if (editingId && currentView !== 'simple') {
         var it = null; list.items.forEach(function (x) { if (x.id === editingId) it = x; });
         if (it) {
@@ -896,9 +853,18 @@
     // New grocery lists default to the name "Grocery" (editable, not
     // forced): pre-fill it whenever the name box is empty and the
     // grocery template is picked, and fall back to it on create.
-    function prefillNewListName() { var n = $('newListName'); if (!n.value.trim() && $('newListType').value === 'grocery') n.value = 'Grocery'; }
+    // The prefill is tracked separately from typed input: switching
+    // the template to Custom clears a still-untouched "Grocery"
+    // default instead of leaving a grocery name on a custom list,
+    // while a name the user typed is never cleared by a switch.
+    var newListNameIsPrefill = false;
+    function prefillNewListName() { var n = $('newListName'); if (!n.value.trim() && $('newListType').value === 'grocery') { n.value = 'Grocery'; newListNameIsPrefill = true; } }
+    $('newListName').addEventListener('input', function () { newListNameIsPrefill = false; });
     $('newListBtn').onclick = function () { $('newListCard').classList.toggle('hidden'); if (!$('newListCard').classList.contains('hidden')) { prefillNewListName(); $('newListName').focus(); } };
-    $('newListType').addEventListener('change', prefillNewListName);
+    $('newListType').addEventListener('change', function () {
+      if ($('newListType').value === 'custom' && newListNameIsPrefill) { $('newListName').value = ''; newListNameIsPrefill = false; }
+      else prefillNewListName();
+    });
     $('addBtn').onclick = function () {
       // Simple quick-add must never inherit stale hidden-field values
       // from a Manage session: start from a clean form.
@@ -908,16 +874,15 @@
     $('cancelAddBtn').onclick = function () { endEdit(); };
     $('addDialog').addEventListener('close', function () { dirty = false; $('bulkState').textContent = ''; if (editingId) endEdit(); });
     $('addDialog').addEventListener('click', function (e) { if (e.target === $('addDialog')) $('addDialog').close(); });
-    $('cancelListBtn').onclick = function () { $('newListCard').classList.add('hidden'); $('newListName').value = ''; };
+    $('cancelListBtn').onclick = function () { $('newListCard').classList.add('hidden'); $('newListName').value = ''; newListNameIsPrefill = false; };
     $('createListBtn').onclick = function () {
       var type = $('newListType').value;
       var name = $('newListName').value.trim();
       if (!name) { if (type === 'grocery') name = 'Grocery'; else return; }
       cancelRename(); resetConfirms();
       var list = { id: uid(), name: name, type: type, items: [], groupSections: false };
-      pushUndo('List created');
       state.lists.push(list); activeListId = list.id;
-      $('newListCard').classList.add('hidden'); $('newListName').value = '';
+      $('newListCard').classList.add('hidden'); $('newListName').value = ''; newListNameIsPrefill = false;
       save().then(render);
     };
     $('renameListBtn').onclick = function () { openRename(); };
@@ -934,7 +899,7 @@
     // is intentionally NOT read: a stale saved value must never flip
     // the dashboard to Manage. Manage is entered from the widget's
     // settings gear (upper right) or a ?view=manage URL, and in
-    // Manage the same header button is a back chevron that returns
+    // Manage the same header button is a back arrow that returns
     // to Simple. View switches are
     // in-memory only — nothing is written back to the saved view.
     var currentView = 'simple';
@@ -950,8 +915,8 @@
       document.body.classList.toggle('simple', view === 'simple');
       $('addBtn').textContent = view === 'simple' ? '+ Add' : '+ Add item';
       // One header button, both directions: the settings gear in
-      // Simple, a back chevron in Manage.
-      $('settingsBtn').textContent = view === 'simple' ? '⚙️' : '←';
+      // Simple, a back arrow in Manage.
+      $('settingsBtn').textContent = view === 'simple' ? '⚙️' : '⬅️';
       $('settingsBtn').title = view === 'simple' ? 'Manage lists' : 'Back to Simple view';
       $('settingsBtn').setAttribute('aria-label', view === 'simple' ? 'Manage lists' : 'Back to Simple view');
     }
@@ -965,23 +930,6 @@
     // loads); no render here — state is not loaded yet.
     currentView = resolveView();
     applyView(currentView);
-    $('copyBtn').onclick = function () {
-      var list = activeList(); if (!list) return;
-      var lines = [list.name.toUpperCase()];
-      list.items.filter(function (i) { return !i.checked; }).forEach(function (i) {
-        var q = i.qty != null ? i.qty + (i.unit ? ' ' + i.unit + ' ' : ' ') : '';
-        lines.push('☐ ' + q + i.name + (i.store ? ' [' + i.store + ']' : ''));
-      });
-      var text = lines.join('\n');
-      // Honest feedback: the sandboxed frame has no clipboard-write
-      // permission, so the write often rejects on the wall — report
-      // that instead of claiming success unconditionally.
-      var resetCopy = function () { $('copyBtn').textContent = '📋 Copy list'; };
-      var done = function () { $('copyBtn').textContent = '✓ Copied!'; setTimeout(resetCopy, 2000); };
-      var failed = function () { $('copyBtn').textContent = 'Copy failed'; setTimeout(resetCopy, 2000); };
-      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done).catch(failed);
-      else { var ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); var ok = false; try { ok = document.execCommand('copy'); } catch (e) {} ta.remove(); if (ok) done(); else failed(); }
-    };
     $('groupSections').addEventListener('change', function () {
       var list = activeList(); if (!list) return;
       list.groupSections = $('groupSections').checked;
@@ -990,29 +938,13 @@
     $('uncheckAllBtn').onclick = function () {
       var list = activeList(); if (!list) return;
       if (!list.items.some(function (i) { return i.checked; })) return;
-      pushUndo('All items unchecked');
       list.items.forEach(function (i) { i.checked = false; i.checkedAt = null; });
       save().then(render);
-    };
-    $('undoBtn').onclick = function () { doUndo(); };
-    $('deleteCheckedBtn').onclick = function () {
-      var list = activeList(); if (!list) return;
-      if (Date.now() < confirmDeleteCheckedUntil) {
-        pushUndo('Checked items deleted');
-        list.items = list.items.filter(function (i) { return !i.checked; });
-        resetConfirms();
-        save().then(render);
-      } else {
-        confirmDeleteCheckedUntil = Date.now() + 4000;
-        $('deleteCheckedBtn').textContent = 'Tap again to confirm delete';
-        setTimeout(function () { if (Date.now() >= confirmDeleteCheckedUntil) $('deleteCheckedBtn').textContent = 'Delete checked items'; }, 4100);
-      }
     };
     $('deleteListBtn').onclick = function () {
       if (state.lists.length <= 1) { setStatus('You need at least one list.'); setTimeout(function () { setStatus(''); }, 3000); return; }
       var list = activeList();
       if (Date.now() < confirmDeleteUntil) {
-        pushUndo('List deleted');
         state.lists = state.lists.filter(function (l) { return l.id !== list.id; });
         activeListId = state.lists[0].id;
         resetConfirms(); cancelRename();
@@ -1026,7 +958,6 @@
     $('bulkBtn').onclick = function () {
       if (editingId) return; // belt-and-braces: inputs are disabled while editing
       var lines = $('bulkBox').value.split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
-      if (lines.length) pushUndo('Items added');
       lines.forEach(function (line) { addItem({ name: line, source: 'import' }); });
       $('bulkState').textContent = lines.length ? lines.length + ' item(s) added.' : '';
       $('bulkBox').value = '';

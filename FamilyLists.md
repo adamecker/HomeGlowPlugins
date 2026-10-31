@@ -61,11 +61,6 @@ quick-add only (see Simple view and Manage view below).
   quantity field only); grocery sections are guessed from the name.
 - **Check / uncheck:** tap the checkbox. Checking the last unchecked
   item celebrates the finished list (if celebrations are on).
-- **Undo:** after checking, unchecking, deleting checked items,
-  removing, adding, editing, renaming, deleting a list, organizing,
-  or drag-reordering, an Undo bar appears for a few seconds — one
-  tap restores the list to before that change (last change only,
-  same last-write-wins rule as any other edit).
 - **Uncheck all:** unchecks every checked item in the current list
   without deleting anything. Use it when a batch of items got checked
   by mistake.
@@ -78,18 +73,13 @@ quick-add only (see Simple view and Manage view below).
   name. Only the name changes — the list keeps its identity, so its
   items, filters, and history are untouched. Empty names are ignored.
 - **Remove:** tap ✕ twice — the first tap asks for confirmation, the
-  second removes the item.
-- **Delete checked items:** two-tap confirm, permanently deletes every
-  checked item. It does not uncheck — for that, use Uncheck all. Undo
-  covers a mistaken delete.
+  second removes the item. Checked items are never deleted in bulk:
+  they stay until you remove them individually or delete the whole
+  list. There is no undo — every removal is an explicit two-tap act.
 - **Delete list:** two-tap confirm. You always retain at least one list;
   deleting the only list just tells you so.
 - **Bulk add:** inside the add dialog — one item per line, same
   quantity parsing as single add; grocery sections are guessed.
-- **Copy list:** copies the unchecked items as plain text, handy for
-  pasting into a message. If copying fails (some displays block
-  clipboard access from widgets), the button says so instead of
-  claiming success.
 
 ## Finding things
 
@@ -117,11 +107,11 @@ Manage is a separate view reached from the widget's settings gear.
   never in the header, and no tab carries a type suffix: grocery tabs
   read "<Name> 🛒", custom tabs read just "<Name>". A new grocery
   list defaults to the name "Grocery" (editable in the dialog, and
-  existing lists are never renamed).
-  Simple shows neither a progress bar nor stats at any width —
-  those live in Manage view only.
-  Checkboxes work here — tap one to check or uncheck, with the usual
-  Undo bar. Checked items stay visible, struck through. There is no
+  existing lists are never renamed). Switching the new-list template
+  to Custom clears that prefilled "Grocery" default; a name you typed
+  yourself is never cleared by switching templates.
+  Checkboxes work here — tap one to check or uncheck. Checked items
+  stay visible, struck through. There is no
   search, sort, store filter, or any delete/rename/new-list control
   in Simple: it is for using the list, not managing it. + Add opens
   a minimal quick-add dialog: name box (quantity parsing still
@@ -132,13 +122,12 @@ Manage is a separate view reached from the widget's settings gear.
   headers too, compact.
 - **Manage view**: the full UI described above — all header controls,
   the full add/edit dialog (every field per template), bulk add,
-  the Group-by-section toggle, drag handles, rename, copy,
-  sort, filters, and delete flows — plus a progress bar and stats
-  (total item count and checked count). The header button becomes
-  a back chevron (←) that returns to Simple.
+  the Group-by-section toggle, drag handles, rename,
+  sort, filters, and delete flows. The header button becomes
+  a back arrow (⬅️) that returns to Simple.
 
 Tap the settings gear (upper right of the widget) to open Manage
-view; in Manage view that same header button is a back chevron (←)
+view; in Manage view that same header button is a back arrow (⬅️)
 that returns to Simple. A `?view=manage` widget URL opens Manage for that load, and
 a `?view=simple` URL param forces Simple the same way. Every fresh
 load shows Simple unless a view param is present — no view is
