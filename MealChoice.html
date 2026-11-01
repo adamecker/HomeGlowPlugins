@@ -8,9 +8,10 @@
 
     A calendar week view (Monday-Friday by default, weekends optional).
     Today highlighted when visible, past days locked. Tap a day and each
-    person chooses their meals from parent-managed options. A choice is
-    per day, per person, per meal, so several people choose
-    independently. Four meals exist — Breakfast, Snack, Lunch, Dinner —
+    person chooses their meals from parent-managed options. Picks are
+    per day, per person, per meal, and a person may pick several
+    options for one meal (no cap), so several people choose
+    independently and one person can pick two snacks. Four meals exist — Breakfast, Snack, Lunch, Dinner —
     each toggleable from Manage; only enabled meals show rows or tabs.
     Lunch is on by default, the others off. Picks for one meal never
     touch another meal's picks, and turning a meal off hides it but
@@ -45,7 +46,7 @@
         { version: 1,
           selectedUserIds: [ <core user id, number> ],
           options: [ { id, name, emoji, color, meals: ["lunch"] } ],  // older docs may carry imageUrl, now ignored
-          picks: { lunch: { "YYYY-MM-DD": { "u<userId>": "<optionId>" } },
+          picks: { lunch: { "YYYY-MM-DD": { "u<userId>": ["<optionId>", ...] } },
                    snack: { ... }, breakfast: { ... }, dinner: { ... } },
           enabledMeals: ["lunch"],
           showWeekends: false,
@@ -61,8 +62,9 @@
     Picks live in the single `picks` map, one sub-map per meal.
     Legacy docs carry `choices` (lunch picks) and `snackChoices`
     instead: on load, choices maps to picks.lunch and snackChoices
-    to picks.snack, so no pick is ever lost; the next save persists
-    the picks shape. Legacy docs carry `snackChoicesEnabled` instead
+    to picks.snack, so no pick is ever lost; a person-slot holding a
+    single option id (the pre-multi-pick shape) wraps to a one-element
+    list on load. The next save persists the picks shape. Legacy docs carry `snackChoicesEnabled` instead
     of `enabledMeals`: true maps to ["lunch", "snack"], absent/false
     to ["lunch"]. enabledMeals defaults to ["lunch"], and while a
     meal is off no UI for it renders and no data for it is written.
@@ -82,8 +84,8 @@
     dialog is open. Concurrent edits: last write wins.
 
     What it deliberately does NOT do: prices, reminders or due dates
-    (those belong to chores), or any integration with other apps. A choice
-    is just a choice; changing it is one tap.
+    (those belong to chores), or any integration with other apps. Picks
+    are just picks; adding or removing one is one tap each.
   -->
   <script type="application/json" id="homeglow-manifest">
   {
@@ -171,6 +173,8 @@
     .daychoice { display: flex; align-items: center; gap: 0.4rem; padding: 0.2rem 0; font-size: 0.9rem; }
     .daychoice .em { font-size: 1.3rem; }
     .daychoice .none { opacity: 0.6; }
+    .daychoice .pickstack, .todayrow .pickstack { display: flex; flex-direction: column; gap: 0.1rem; }
+    .daychoice .pickstack .pick, .todayrow .pickstack .pick { display: flex; align-items: center; gap: 0.4rem; }
     .manage h2 { font-size: 1.05rem; margin: 1rem 0 0.5rem; }
     .mrow {
       display: flex; align-items: center; gap: 0.5rem; padding: 0.45rem 0;
@@ -284,6 +288,7 @@
     <div class="mealrow" id="choiceMeal"></div>
     <div class="pickrow" id="choicePeople"></div>
     <div class="optgrid" id="choiceOptions"></div>
+    <p class="hint">Tap options to add or remove them — a person can pick more than one.</p>
     <div class="dlgfoot">
       <button type="button" class="smallbtn" id="clearChoiceBtn">Clear choice</button>
       <span class="spacer"></span>
@@ -519,9 +524,14 @@
       if (!state.picks[meal]) state.picks[meal] = {};
       return state.picks[meal];
     }
-    function choiceForMeal(dateKeyStr, personId, meal) {
+    // Multi-pick: a person-slot holds an ARRAY of option ids (no cap).
+    // This accessor always returns an array, wrapping a legacy single
+    // id defensively so render paths never see a scalar.
+    function choicesForMeal(dateKeyStr, personId, meal) {
       var day = mealPicks(meal)[dateKeyStr] || {};
-      return day[personId] || null;
+      var v = day[personId];
+      if (Array.isArray(v)) return v.filter(function (id) { return typeof id === 'string'; });
+      return (typeof v === 'string' && v) ? [v] : [];
     }
 
     // ---- storage: SDK first, localStorage fallback (standalone preview) ----
@@ -575,8 +585,10 @@
       var sel = Array.isArray(doc.selectedUserIds) ? doc.selectedUserIds.filter(function (id) { return typeof id === 'number'; }) : [];
       // Picks: prefer the generalized map when present; otherwise
       // carry legacy picks over (choices -> lunch, snackChoices ->
-      // snack), so no pick is ever lost. The next save persists the
-      // picks shape and drops the legacy fields.
+      // snack), so no pick is ever lost. Every person-slot wraps to
+      // an array (a legacy single id becomes a one-element list).
+      // The next save persists the picks shape and drops the legacy
+      // fields.
       var picks = {};
       MEALS.forEach(function (m) {
         var src = null;
@@ -584,6 +596,17 @@
         else if (m.id === 'lunch' && doc.choices && typeof doc.choices === 'object') src = doc.choices;
         else if (m.id === 'snack' && doc.snackChoices && typeof doc.snackChoices === 'object') src = doc.snackChoices;
         picks[m.id] = src || {};
+      });
+      MEALS.forEach(function (m) {
+        Object.keys(picks[m.id]).forEach(function (dk) {
+          var day = picks[m.id][dk];
+          if (!day || typeof day !== 'object' || Array.isArray(day)) return;
+          Object.keys(day).forEach(function (pid) {
+            var v = day[pid];
+            if (Array.isArray(v)) day[pid] = v.filter(function (id) { return typeof id === 'string'; });
+            else day[pid] = (typeof v === 'string' && v) ? [v] : [];
+          });
+        });
       });
       // Enabled meals: prefer the list when present; otherwise the
       // legacy snack toggle maps over (on -> lunch + snack, off or
@@ -684,13 +707,13 @@
       var lunchOn = isMealEnabled('lunch');
       visiblePeople().forEach(function (p) {
         enabledMealDefs().forEach(function (m) {
-          var cid = choiceForMeal(tk, p.id, m.id);
-          var o = cid ? optionById(cid) : null;
+          var picked = choicesForMeal(tk, p.id, m.id).map(function (id) { return optionById(id); }).filter(function (o) { return !!o; });
           var row = '<div class="todayrow">';
           if (m.id === 'lunch' || !lunchOn) row += personLabel(p);
           if (m.id !== 'lunch') row += '<span class="choice">' + m.emoji + ' ' + esc(m.label) + '</span>';
           row += '<span class="choice">' +
-            (o ? optionVisual(o) + ' ' + esc(o.name) : '<span class="none">' + (m.id === 'lunch' ? 'Not chosen yet' : 'No ' + m.label.toLowerCase() + ' yet') + '</span>') + '</span>';
+            (picked.length ? '<span class="pickstack">' + picked.map(function (o) { return '<span class="pick">' + optionVisual(o) + ' ' + esc(o.name) + '</span>'; }).join('') + '</span>' :
+              '<span class="none">' + (m.id === 'lunch' ? 'Not chosen yet' : 'No ' + m.label.toLowerCase() + ' yet') + '</span>') + '</span>';
           html += row + '</div>';
         });
       });
@@ -734,12 +757,11 @@
         var lunchOn = isMealEnabled('lunch');
         visiblePeople().forEach(function (p) {
           enabledMealDefs().forEach(function (m) {
-            var cid = choiceForMeal(key, p.id, m.id);
-            var o = cid ? optionById(cid) : null;
+            var picked = choicesForMeal(key, p.id, m.id).map(function (id) { return optionById(id); }).filter(function (o) { return !!o; });
             html += '<div class="daychoice">';
             if (m.id === 'lunch' || !lunchOn) html += personLabel(p);
             if (m.id !== 'lunch') html += '<span class="meallabel">' + m.emoji + ' ' + esc(m.label) + '</span>';
-            html += (o ? '<span>' + optionVisual(o) + ' ' + esc(o.name) + '</span>' :
+            html += (picked.length ? '<span class="pickstack">' + picked.map(function (o) { return '<span class="pick">' + optionVisual(o) + ' ' + esc(o.name) + '</span>'; }).join('') + '</span>' :
               '<span class="none">—</span>') + '</div>';
           });
         });
@@ -860,7 +882,11 @@
         Object.keys(state.picks || {}).forEach(function (meal) {
           Object.keys(state.picks[meal] || {}).forEach(function (dk) {
             Object.keys(state.picks[meal][dk]).forEach(function (pid) {
-              if (state.picks[meal][dk][pid] === id) delete state.picks[meal][dk][pid];
+              var v = state.picks[meal][dk][pid];
+              if (Array.isArray(v)) {
+                var kept = v.filter(function (x) { return x !== id; });
+                if (kept.length) state.picks[meal][dk][pid] = kept; else delete state.picks[meal][dk][pid];
+              } else if (v === id) delete state.picks[meal][dk][pid];
             });
           });
         });
@@ -932,8 +958,8 @@
       dialogDateKey = key;
       dialogMeal = (enabledMealDefs()[0] || { id: 'lunch' }).id;
       var vis = visiblePeople();
-      var withChoice = vis.filter(function (p) { return choiceForMeal(key, p.id, dialogMeal); });
-      var without = vis.filter(function (p) { return !choiceForMeal(key, p.id, dialogMeal); });
+      var withChoice = vis.filter(function (p) { return choicesForMeal(key, p.id, dialogMeal).length > 0; });
+      var without = vis.filter(function (p) { return choicesForMeal(key, p.id, dialogMeal).length === 0; });
       dialogPersonId = (without[0] || vis[0]).id;
       renderChoiceDialog();
       openDialog($('choiceDialog'));
@@ -968,7 +994,7 @@
         b.type = 'button';
         b.className = 'personchip';
         b.setAttribute('aria-pressed', p.id === dialogPersonId ? 'true' : 'false');
-        var has = !!choiceForMeal(key, p.id, dialogMeal);
+        var has = choicesForMeal(key, p.id, dialogMeal).length > 0;
         b.innerHTML = avatarHtml(p, 'avatar') +
           '<span>' + esc(p.name) + (has ? ' ✓' : '') + '</span>';
         b.addEventListener('click', function () { dialogPersonId = p.id; renderChoiceDialog(); });
@@ -984,16 +1010,22 @@
       mealOptions.forEach(function (o) {
         var b = document.createElement('button');
         b.type = 'button';
-        b.className = 'optbtn' + (choiceForMeal(key, dialogPersonId, dialogMeal) === o.id ? ' chosen' : '');
+        b.className = 'optbtn' + (choicesForMeal(key, dialogPersonId, dialogMeal).indexOf(o.id) !== -1 ? ' chosen' : '');
         b.style.borderColor = o.color || '';
         b.innerHTML = optionVisual(o) + '<span class="nm">' + esc(o.name) + '</span>';
+        // Multi-toggle: tap adds or removes this option from the
+        // person's set for this meal/day. No auto-advance — the
+        // person stays selected so several taps accumulate, and Done
+        // closes the dialog.
         b.addEventListener('click', function () {
           var map = mealPicks(dialogMeal);
           if (!map[key]) map[key] = {};
-          map[key][dialogPersonId] = o.id;
+          var cur = map[key][dialogPersonId];
+          var arr = Array.isArray(cur) ? cur.slice() : ((typeof cur === 'string' && cur) ? [cur] : []);
+          var i = arr.indexOf(o.id);
+          if (i !== -1) arr.splice(i, 1); else arr.push(o.id);
+          if (arr.length) map[key][dialogPersonId] = arr; else delete map[key][dialogPersonId];
           save().then(function () {
-            var next = visiblePeople().filter(function (p) { return !choiceForMeal(key, p.id, dialogMeal); })[0];
-            if (next) dialogPersonId = next.id;
             renderChoiceDialog();
             renderWeek();
           });

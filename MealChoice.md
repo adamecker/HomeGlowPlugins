@@ -3,8 +3,8 @@
 A calendar week view where each person taps a day and chooses the
 meals their parents will pack. It is built for school days, so the
 default week is Monday–Friday. Each person chooses independently — a
-household with several kids gets one choice per kid per day per meal,
-not one choice for the house.
+household with several kids gets one or more picks per kid per day
+per meal, not one choice for the house.
 
 Four meals exist — Breakfast, Snack, Lunch, Dinner — each toggleable
 from Manage. Lunch is on by default; the others are off until turned
@@ -14,7 +14,7 @@ so turning it back on restores them.
 ## Use it
 
 - **Week view:** the current calendar week, Monday–Friday by default.
-  Each day card shows every selected person's choice per enabled meal
+  Each day card shows every selected person's picks per enabled meal
   (or a dash if they haven't chosen). Tap a day to choose. Past days
   are shown greyed out and can't be changed. Today is highlighted
   when it is visible. The week view fits its container: it starts at
@@ -38,12 +38,13 @@ so turning it back on restores them.
   (and the Today button) default to *next* week's Monday–Friday
   instead of showing an empty week.
 - **Choose:** in the dialog, pick whose meal you're setting (the
-  person chips), then tap an option. The choice saves immediately; the
-  dialog moves to the next person who hasn't chosen yet, if there is
-  one. **Clear choice** removes the selected person's choice for that
-  day and meal. **Done** closes the dialog. When more than one meal
-  is enabled, the dialog has a tab per enabled meal; with a single
-  meal enabled there are no tabs.
+  person chips), then tap options to add or remove them from that
+  person's set for the day and meal — a person can pick more than
+  one, with no cap. Each tap saves immediately and the person stays
+  selected, so several taps accumulate. **Clear choice** empties the
+  selected person's set for that day and meal. **Done** closes the
+  dialog. When more than one meal is enabled, the dialog has a tab
+  per enabled meal; with a single meal enabled there are no tabs.
 - **Meals (optional):** Manage has a Meals list — Breakfast, Snack,
   Lunch, Dinner — each with its own checkbox. Lunch is on by default;
   the others are off. Turning a meal on adds a pick row for it to each
@@ -77,8 +78,8 @@ so turning it back on restores them.
 There are two supported ways to use the widget:
 
 - **Mode A — one widget, everyone:** the default. Every person appears
-  on every day card, and the choice dialog steps through the person
-  chips with auto-advance. The wall usually runs this way.
+  on every day card, and the choice dialog shows all person chips —
+  tap a chip to switch people.
 - **Mode B — one display, some people:** Manage has an "On this
   display" section. Uncheck someone there and they disappear from
   *that display's* week view, Today box, and choice dialog — other
@@ -150,8 +151,8 @@ Plugin storage key `data`:
   "selectedUserIds": [1, 2],
   "options": [{ "id": "...", "name": "Sandwich", "emoji": "🥪", "color": "#ffb74d", "meals": ["lunch"] }],
   "picks": {
-    "lunch": { "2026-10-29": { "u1": "<optionId>" } },
-    "snack": { "2026-10-29": { "u1": "<optionId>" } }
+    "lunch": { "2026-10-29": { "u1": ["<optionId>", "<optionId>"] } },
+    "snack": { "2026-10-29": { "u1": ["<optionId>"] } }
   },
   "enabledMeals": ["lunch"],
   "showWeekends": false,
@@ -160,7 +161,9 @@ Plugin storage key `data`:
 ```
 
 Picks are keyed by `"u" + <household user id>`, nested under the
-meal id. Dates are local `YYYY-MM-DD`. An option's `meals` is the
+meal id. Dates are local `YYYY-MM-DD`. Each person-slot holds an
+array of option ids (no cap); a legacy single id wraps to a
+one-element array on load. An option's `meals` is the
 configurable set of meals it appears in (any non-empty subset of
 `breakfast`, `snack`, `lunch`, `dinner`). Only enabled meals render
 rows and tabs, and only enabled meals are written; a disabled meal's
@@ -179,7 +182,9 @@ no pick loss: `serves "lunch"` becomes `["lunch"]`, `"snack"`
 becomes `["snack"]`, `"both"` becomes `["lunch", "snack"]` (both
 predates breakfast/dinner, so it never means all four), and options
 with no field become `["lunch"]`; `choices` becomes `picks.lunch`
-and `snackChoices` becomes `picks.snack`; `snackChoicesEnabled: true`
+and `snackChoices` becomes `picks.snack`; a person-slot holding a
+single option id (the pre-multi-pick shape) wraps to a one-element
+list on load; `snackChoicesEnabled: true`
 becomes `enabledMeals: ["lunch", "snack"]`, while absent or false
 becomes `["lunch"]`. The next save persists the meals shape. The
 plugin was renamed from `LunchChoice.html` (storage key
