@@ -476,7 +476,7 @@
       // First run starts with an empty Groceries list — no seeded items.
       // (An earlier version seeded one Milk item here; it looked like a
       // real household item, so it was removed.)
-      return { version: 1, updatedAt: nowIso(), lists: [
+      return { version: 1, updatedAt: nowIso(), showChecked: true, lists: [
         { id: uid(), name: 'Groceries', type: 'grocery', items: [] }
       ] };
     }
@@ -637,13 +637,13 @@
       // Simple ignores the other management controls (they are hidden, so a
       // leftover filter from Manage must never continue filtering here):
       // no search, no store filter, default sort. The "Show checked"
-      // checkbox is the exception: it lives in the same document and
-      // stays in the DOM while Simple hides the toolbar, so Simple
-      // honors the state set in Manage.
+      // checkbox is the exception: its state lives in the shared document
+      // (state.showChecked, default true when absent), so both views honor
+      // it and it survives a dashboard reload.
       var isSimple = currentView === 'simple';
       var q = isSimple ? '' : ($('searchBox').value || '').trim().toLowerCase();
       var storeF = isSimple ? '' : $('storeFilter').value;
-      var showChecked = $('showChecked').checked;
+      var showChecked = state.showChecked !== false;
       var sort = isSimple ? 'entry' : $('sortSel').value;
       var grouped = list.type === 'grocery' && !!list.groupSections;
       var items = list.items.slice();
@@ -738,7 +738,7 @@
         try { if (window.HomeGlow && window.HomeGlow.celebrate) window.HomeGlow.celebrate(); } catch (e) {}
       }
     }
-    function render() { renderTitle(); renderTabs(); renderMeta(); renderItems(); }
+    function render() { $('showChecked').checked = state.showChecked !== false; renderTitle(); renderTabs(); renderMeta(); renderItems(); }
 
     // ---- editing ----
     // Adds and edits both happen in the add dialog: the form is prefilled
@@ -868,7 +868,7 @@
     $('searchBox').addEventListener('input', renderItems);
     $('sortSel').addEventListener('change', renderItems);
     $('storeFilter').addEventListener('change', renderItems);
-    $('showChecked').addEventListener('change', renderItems);
+    $('showChecked').addEventListener('change', function () { state.showChecked = $('showChecked').checked; save().then(render); });
     // New grocery lists default to the name "Grocery" (editable, not
     // forced): pre-fill it whenever the name box is empty and the
     // grocery template is picked, and fall back to it on create.
