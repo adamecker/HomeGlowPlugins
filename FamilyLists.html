@@ -634,13 +634,16 @@
     }
     function renderItems() {
       var list = activeList(); if (!list) return;
-      // Simple ignores every management control (they are hidden, so a
+      // Simple ignores the other management controls (they are hidden, so a
       // leftover filter from Manage must never continue filtering here):
-      // no search, no store filter, checked always shown, default sort.
+      // no search, no store filter, default sort. The "Show checked"
+      // checkbox is the exception: it lives in the same document and
+      // stays in the DOM while Simple hides the toolbar, so Simple
+      // honors the state set in Manage.
       var isSimple = currentView === 'simple';
       var q = isSimple ? '' : ($('searchBox').value || '').trim().toLowerCase();
       var storeF = isSimple ? '' : $('storeFilter').value;
-      var showChecked = isSimple ? true : $('showChecked').checked;
+      var showChecked = $('showChecked').checked;
       var sort = isSimple ? 'entry' : $('sortSel').value;
       var grouped = list.type === 'grocery' && !!list.groupSections;
       var items = list.items.slice();
