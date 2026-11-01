@@ -2,24 +2,26 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Lunch Choice</title>
+  <title>Meal Choice</title>
   <!--
-    Lunch Choice — a generic lunch-picker widget for HomeGlow.
+    Meal Choice — a generic meal-picker widget for HomeGlow.
 
     A calendar week view (Monday-Friday by default, weekends optional).
     Today highlighted when visible, past days locked. Tap a day and each
-    person chooses their lunch from parent-managed options. A choice is
-    per day, per person, so several people choose independently.
-    When snack picks are enabled (Manage, off by default), each day
-    also has a snack pick per person, from snack options. Lunch and
-    snack picks are independent: changing one never touches the other.
+    person chooses their meals from parent-managed options. A choice is
+    per day, per person, per meal, so several people choose
+    independently. Four meals exist — Breakfast, Snack, Lunch, Dinner —
+    each toggleable from Manage; only enabled meals show rows or tabs.
+    Lunch is on by default, the others off. Picks for one meal never
+    touch another meal's picks, and turning a meal off hides it but
+    keeps its saved picks, so re-enabling restores them.
     A display can also show only some people (a per-display filter stored
     on the display itself, not in the shared doc) - see LunchChoice.md.
 
     People come from the household itself, not from a create form:
     Manage reads the HomeGlow user list (GET /api/users, a read-only
     core route the plugin request policy allows plugins with their
-    frame token) and parents select which users are lunch choosers.
+    frame token) and parents select which users are meal choosers.
     Each user shows their household profile picture when set, else a
     generic glyph. Nothing is hardcoded and no household data ships in
     the code. First run starts with nobody selected — select users in
@@ -32,7 +34,7 @@
     full photos as data URLs. See LunchChoice.md.
 
     The week view fits its container: it shows a window of days
-    starting at the next lunch to pick (tomorrow, or the next school
+    starting at the next meal to pick (tomorrow, or the next school
     day when tomorrow is not one), and the number of days shown grows
     with the widget's actual width — a small widget shows only that
     next day, a large one shows the full week. Day cards stretch to
@@ -42,24 +44,36 @@
       HomeGlow.storage key "data", value:
         { version: 1,
           selectedUserIds: [ <core user id, number> ],
-          options: [ { id, name, emoji, color, serves } ],  // older docs may carry imageUrl, now ignored
-          choices: { "YYYY-MM-DD": { "u<userId>": "<optionId>" } },
-          snackChoices: { "YYYY-MM-DD": { "u<userId>": "<optionId>" } },
-          snackChoicesEnabled: false,
+          options: [ { id, name, emoji, color, meals: ["lunch"] } ],  // older docs may carry imageUrl, now ignored
+          picks: { lunch: { "YYYY-MM-DD": { "u<userId>": "<optionId>" } },
+                   snack: { ... }, breakfast: { ... }, dinner: { ... } },
+          enabledMeals: ["lunch"],
           showWeekends: false,
           updatedAt: ISO timestamp }
-    An option's `serves` is 'lunch', 'snack', or 'both'; options
-    without serves count as 'lunch', so older documents need no
-    rewrite. snackChoices mirrors choices exactly (per day, per
-    person); snackChoicesEnabled defaults to false, and while it is
-    off no snack UI renders and no snack data is written.
+    An option's `meals` is the configurable set of meals it appears
+    in, any subset of breakfast/snack/lunch/dinner (at least one).
+    Legacy docs carry `serves` instead ('lunch' | 'snack' | 'both'):
+    on load, serves maps to meals ('lunch' -> ["lunch"], 'snack' ->
+    ["snack"], 'both' -> ["lunch", "snack"] — both predates
+    breakfast/dinner, so it never means all four), and options
+    without either field count as ["lunch"], so older documents need
+    no rewrite; the next save persists the meals shape.
+    Picks live in the single `picks` map, one sub-map per meal.
+    Legacy docs carry `choices` (lunch picks) and `snackChoices`
+    instead: on load, choices maps to picks.lunch and snackChoices
+    to picks.snack, so no pick is ever lost; the next save persists
+    the picks shape. Legacy docs carry `snackChoicesEnabled` instead
+    of `enabledMeals`: true maps to ["lunch", "snack"], absent/false
+    to ["lunch"]. enabledMeals defaults to ["lunch"], and while a
+    meal is off no UI for it renders and no data for it is written.
     The legacy `people` array and choices keyed by custom person ids,
     from before users came from the household list, are preserved in
     the document untouched on save but are no longer rendered.
-    showWeekends is household-wide (all displays share it); the per-display
-    people filter lives in this display's localStorage shim only, never in
-    the shared doc. The snack toggle (snackChoicesEnabled) is household-wide
-    too: turning it off hides snack picks everywhere but keeps them saved.
+    showWeekends is household-wide (all displays share it), as is
+    enabledMeals; the per-display people filter lives in this
+    display's localStorage shim only, never in the shared doc.
+    The meal toggles are household-wide too: turning a meal off hides
+    its picks everywhere but keeps them saved.
     Older docs without showWeekends default to false.
     Choices are local dates (YYYY-MM-DD from local parts, never UTC).
     The widget polls storage (default every 10s, setting `pollSeconds`)
@@ -75,8 +89,8 @@
   {
     "manifestVersion": 1,
     "id": "lunch-choice",
-    "name": "Lunch Choice",
-    "description": "Pick tomorrow's packed lunch: a week view where each person taps a day and chooses from parent-managed options, shown with big emoji so pre-readers can choose too.",
+    "name": "Meal Choice",
+    "description": "Pick the day's meals: a week view where each person taps a day and chooses breakfast, snack, lunch, or dinner from parent-managed options, shown with big emoji so pre-readers can choose too.",
     "apiVersion": "v1",
     "storage": true,
     "settings": [
@@ -214,7 +228,7 @@
     .optbtn.chosen { outline: 3px solid var(--accent, #4a90d9); outline-offset: 1px; }
     .optbtn .em { font-size: 2.2rem; line-height: 1; }
     .optbtn .nm { font-size: 0.85rem; font-weight: 600; text-align: center; overflow-wrap: anywhere; }
-    .servebadge {
+    .mealbadge {
       font-size: 0.75rem; font-weight: 600; border: 1px solid var(--border, #ccc);
       border-radius: 999px; padding: 0.15rem 0.5rem; flex: none; white-space: nowrap;
     }
@@ -224,7 +238,7 @@
       color: inherit; padding: 0.4rem 0.9rem; min-height: 40px; font-weight: 600;
     }
     .mealbtn[aria-pressed="true"] { outline: 3px solid var(--accent, #4a90d9); outline-offset: 1px; }
-    .daychoice .snacklabel { font-size: 0.8rem; opacity: 0.75; }
+    .daychoice .meallabel { font-size: 0.8rem; opacity: 0.75; }
     .dlgfoot { display: flex; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap; }
     .dlgfoot .spacer { flex: 1; }
     .hint { font-size: 0.85rem; opacity: 0.75; }
@@ -236,7 +250,7 @@
 <body>
   <div class="wrap">
     <div class="head">
-      <h1>🍱 Lunch Choice</h1>
+      <h1>🍽️ Meal Choice</h1>
       <span class="spacer"></span>
       <button type="button" class="todaybtn" id="todayBtn">Today</button>
       <button type="button" class="navbtn" id="prevBtn" aria-label="Previous week">‹</button>
@@ -265,8 +279,8 @@
     <div class="sync" id="syncLine" role="status"></div>
   </div>
 
-  <dialog id="choiceDialog" aria-label="Choose lunch or snack">
-    <h2 id="choiceTitle">Choose lunch</h2>
+  <dialog id="choiceDialog" aria-label="Choose a meal">
+    <h2 id="choiceTitle">Choose a meal</h2>
     <div class="mealrow" id="choiceMeal"></div>
     <div class="pickrow" id="choicePeople"></div>
     <div class="optgrid" id="choiceOptions"></div>
@@ -287,8 +301,9 @@
     <input type="text" id="optionEmojiCustom" maxlength="12" autocomplete="off" placeholder="🍽️">
     <label>Color</label>
     <div class="pickrow" id="optionColorPick"></div>
-    <label>Used for</label>
-    <div class="mealrow" id="optionServesPick"></div>
+    <label>Meals</label>
+    <div class="mealrow" id="optionMealsPick"></div>
+    <p class="hint">An option appears in the picker of every meal it is tagged with. At least one meal stays tagged.</p>
     <div class="dlgfoot">
       <button type="button" class="navbtn" id="optionSaveBtn">Save</button>
       <button type="button" class="smallbtn" id="optionCancelBtn">Cancel</button>
@@ -302,6 +317,62 @@
     var MAX_DOC_BYTES = 60000; // under the 64 KB server per-key cap
     var COLORS = ['#e57373', '#f06292', '#ba68c8', '#7986cb', '#64b5f6', '#4db6ac', '#81c784', '#dce775', '#ffb74d', '#ff8a65'];
     var FOOD_EMOJI = ['🥪', '🍕', '🍝', '🌮', '🥗', '🍎', '🍌', '🧀', '🥚', '🍗', '🥦', '🍓', '🥞', '🧇', '🥨', '🍩', '🍪', '🥛', '🧃', '🍫'];
+    // Food -> emoji keyword map for auto-defaulting a new option's emoji.
+    // Seeded from the household's proven option pairs (sandwich, egg,
+    // bagel, salami, yogurt, oats, salad, crackers, brats, sausage,
+    // cheese, pepperoni, strawberries, mango, tortilla, celery,
+    // chocolate, chicken salad, blueberry bagel, cashew butter) plus
+    // common foods. Matching is case-insensitive whole words; on
+    // multiple matches the longest keyword wins, so a phrase like
+    // "chicken salad" beats its parts ("salad", "crackers"). No match
+    // returns '' — the emoji stays unset, never a wrong guess.
+    var FOOD_EMOJI_MAP = [
+      ['blueberry bagel', '🥯'],
+      ['cashew butter', '🥬'],
+      ['chicken salad', '🥗'],
+      ['sandwich', '🥪'], ['bagel', '🥯'],
+      ['egg', '🥚'], ['eggs', '🥚'],
+      ['salami', '🥩'], ['sausage', '🍖'],
+      ['brat', '🌭'], ['brats', '🌭'],
+      ['yogurt', '🥣'], ['yoghurt', '🥣'],
+      ['oats', '🌾'], ['oatmeal', '🌾'],
+      ['salad', '🥗'], ['cracker', '🥨'], ['crackers', '🥨'],
+      ['cheese', '🧀'], ['pepperoni', '🍕'], ['pizza', '🍕'],
+      ['banana', '🍌'], ['apple', '🍎'], ['milk', '🥛'],
+      ['chicken', '🍗'], ['pasta', '🍝'], ['spaghetti', '🍝'],
+      ['taco', '🌮'], ['tacos', '🌮'],
+      ['carrot', '🥕'], ['carrots', '🥕'], ['broccoli', '🥦'],
+      ['strawberry', '🍓'], ['strawberries', '🍓'],
+      ['blueberry', '🫐'], ['blueberries', '🫐'],
+      ['mango', '🥭'], ['celery', '🥬'], ['butter', '🧈'],
+      ['chocolate', '🍫'], ['marshmallow', '🍫'], ['marshmallows', '🍫'],
+      ['tortilla', '🌽']
+    ];
+    function matchFoodEmoji(name) {
+      var padded = ' ' + (name || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim() + ' ';
+      var best = '', bestLen = 0;
+      FOOD_EMOJI_MAP.forEach(function (pair) {
+        if (pair[0].length > bestLen && padded.indexOf(' ' + pair[0] + ' ') !== -1) { best = pair[1]; bestLen = pair[0].length; }
+      });
+      return best;
+    }
+    // Reflect an (auto or manual) emoji value in the picker row's
+    // pressed states; a value outside the row simply clears them.
+    function syncEmojiPick(value) {
+      Array.prototype.forEach.call($('optionEmojiPick').children, function (x) {
+        x.setAttribute('aria-pressed', x.textContent === value ? 'true' : 'false');
+      });
+    }
+    // The four meals, in the order Adam listed them. The order also
+    // sets tab order, badge order, and row order everywhere.
+    var MEALS = [
+      { id: 'breakfast', label: 'Breakfast', emoji: '🍳' },
+      { id: 'snack', label: 'Snack', emoji: '🍿' },
+      { id: 'lunch', label: 'Lunch', emoji: '🍱' },
+      { id: 'dinner', label: 'Dinner', emoji: '🍲' }
+    ];
+    function mealDef(id) { for (var i = 0; i < MEALS.length; i++) { if (MEALS[i].id === id) return MEALS[i]; } return null; }
+    function mealLabel(id) { var m = mealDef(id); return m ? m.label : id; }
 
     var state = null; // { version:1, selectedUserIds:[], options:[], choices:{}, updatedAt } (+ dormant legacy people)
     var coreUsers = []; // household users from GET /api/users, excluding the id-0 bonus pseudo-user
@@ -312,8 +383,9 @@
     var view = 'week'; // 'week' | 'manage'
     var dialogDateKey = null;
     var dialogPersonId = null;
-    var dialogMeal = 'lunch'; // 'lunch' | 'snack': which pick the choice dialog is setting
-    var dialogServes = 'lunch'; // 'lunch' | 'snack' | 'both': serves value being edited in the option dialog
+    var dialogMeal = 'lunch'; // a meal id: which pick the choice dialog is setting
+    var dialogMeals = ['lunch']; // meal ids tagged on the option being edited in the option dialog
+    var dialogEmojiManual = false; // true once the user picks an emoji by hand (picker or custom field) — auto-default then stops
     var editingOptionId = null;
     var dialogOpen = false;
     var recoveryPending = false;
@@ -346,7 +418,7 @@
     function defaultWeekMonday(now) {
       now = now || new Date();
       var mon = mondayOf(now);
-      // School lunches are Mon-Fri. On Sat/Sun with weekends hidden there is
+      // School days are Mon-Fri. On Sat/Sun with weekends hidden there is
       // nothing pickable this week, so default to next week's Mon-Fri.
       if (!state.showWeekends && (now.getDay() === 0 || now.getDay() === 6)) return addDays(mon, 7);
       return mon;
@@ -420,28 +492,35 @@
     }
     function personById(id) { return selectedPeople().filter(function (p) { return p.id === id; })[0] || null; }
     function optionById(id) { return (state.options || []).filter(function (o) { return o.id === id; })[0] || null; }
-    function choiceFor(dateKeyStr, personId) {
-      var day = (state.choices || {})[dateKeyStr] || {};
-      return day[personId] || null;
+    // An option's meals: the configurable set of meals it appears in.
+    // Legacy docs carry `serves` instead: 'lunch' -> ['lunch'],
+    // 'snack' -> ['snack'], 'both' -> ['lunch', 'snack'] (both predates
+    // breakfast/dinner, so it never means all four). Options with
+    // neither field count as ['lunch'], so older documents need no
+    // rewrite; the next save persists the meals shape.
+    function mealsOf(o) {
+      if (o && Array.isArray(o.meals)) {
+        var out = [];
+        o.meals.forEach(function (m) { if (mealDef(m) && out.indexOf(m) === -1) out.push(m); });
+        if (out.length) return out;
+      }
+      if (o && o.serves === 'snack') return ['snack'];
+      if (o && o.serves === 'both') return ['lunch', 'snack'];
+      return ['lunch'];
     }
-    // serves: 'lunch' | 'snack' | 'both'. Options saved before serves
-    // existed carry no field and count as lunch, so older documents
-    // need no rewrite.
-    function servesOf(o) {
-      if (o && (o.serves === 'snack' || o.serves === 'both')) return o.serves;
-      return 'lunch';
-    }
-    function servesMeal(o, meal) {
-      var s = servesOf(o);
-      return meal === 'snack' ? (s === 'snack' || s === 'both') : (s === 'lunch' || s === 'both');
-    }
-    function mealChoices(meal) {
-      if (meal === 'snack') { if (!state.snackChoices) state.snackChoices = {}; return state.snackChoices; }
-      if (!state.choices) state.choices = {};
-      return state.choices;
+    function optionHasMeal(o, meal) { return mealsOf(o).indexOf(meal) !== -1; }
+    function isMealEnabled(meal) { return (state.enabledMeals || []).indexOf(meal) !== -1; }
+    function enabledMealDefs() { return MEALS.filter(function (m) { return isMealEnabled(m.id); }); }
+    // Picks: one sub-map per meal, { date: { person: optionId } }.
+    // A single generalized map replaces the old per-meal fields
+    // (choices, snackChoices); normalize() carries legacy picks over.
+    function mealPicks(meal) {
+      if (!state.picks) state.picks = {};
+      if (!state.picks[meal]) state.picks[meal] = {};
+      return state.picks[meal];
     }
     function choiceForMeal(dateKeyStr, personId, meal) {
-      var day = mealChoices(meal)[dateKeyStr] || {};
+      var day = mealPicks(meal)[dateKeyStr] || {};
       return day[personId] || null;
     }
 
@@ -487,20 +566,49 @@
     function defaultState() {
       // First run starts with nobody selected: select users in Manage.
       // No example names — nothing here may look like household data.
-      return { version: 1, selectedUserIds: [], options: [], choices: {}, snackChoices: {}, snackChoicesEnabled: false, showWeekends: false, updatedAt: nowIso() };
+      // Lunch is the only meal on by default, preserving the
+      // pre-meals behavior (snack stays opt-in, as it was).
+      return { version: 1, selectedUserIds: [], options: [], picks: {}, enabledMeals: ['lunch'], showWeekends: false, updatedAt: nowIso() };
     }
     function normalize(doc) {
       if (!doc || typeof doc !== 'object') return defaultState();
       var sel = Array.isArray(doc.selectedUserIds) ? doc.selectedUserIds.filter(function (id) { return typeof id === 'number'; }) : [];
+      // Picks: prefer the generalized map when present; otherwise
+      // carry legacy picks over (choices -> lunch, snackChoices ->
+      // snack), so no pick is ever lost. The next save persists the
+      // picks shape and drops the legacy fields.
+      var picks = {};
+      MEALS.forEach(function (m) {
+        var src = null;
+        if (doc.picks && typeof doc.picks === 'object' && doc.picks[m.id] && typeof doc.picks[m.id] === 'object') src = doc.picks[m.id];
+        else if (m.id === 'lunch' && doc.choices && typeof doc.choices === 'object') src = doc.choices;
+        else if (m.id === 'snack' && doc.snackChoices && typeof doc.snackChoices === 'object') src = doc.snackChoices;
+        picks[m.id] = src || {};
+      });
+      // Enabled meals: prefer the list when present; otherwise the
+      // legacy snack toggle maps over (on -> lunch + snack, off or
+      // absent -> lunch only). Normalized to MEALS order.
+      var enabled = null;
+      if (Array.isArray(doc.enabledMeals)) {
+        var kept = doc.enabledMeals.filter(function (id) { return !!mealDef(id); });
+        if (kept.length) enabled = kept;
+      }
+      if (!enabled) enabled = doc.snackChoicesEnabled === true ? ['lunch', 'snack'] : ['lunch'];
+      enabled = MEALS.filter(function (m) { return enabled.indexOf(m.id) !== -1; }).map(function (m) { return m.id; });
       return {
         version: 1,
         selectedUserIds: sel,
         // Dormant legacy data: preserved untouched on save, never rendered.
         people: Array.isArray(doc.people) ? doc.people.filter(function (p) { return p && p.id && p.name; }) : [],
-        options: Array.isArray(doc.options) ? doc.options.filter(function (o) { return o && o.id && o.name; }) : [],
-        choices: (doc.choices && typeof doc.choices === 'object') ? doc.choices : {},
-        snackChoices: (doc.snackChoices && typeof doc.snackChoices === 'object') ? doc.snackChoices : {},
-        snackChoicesEnabled: doc.snackChoicesEnabled === true,
+        // Options migrate to meals arrays on load (serves mapping in
+        // mealsOf); the next save persists that shape.
+        options: Array.isArray(doc.options) ? doc.options.filter(function (o) { return o && o.id && o.name; }).map(function (o) {
+          var out = { id: o.id, name: o.name, emoji: o.emoji, color: o.color, meals: mealsOf(o) };
+          if (o.imageUrl) out.imageUrl = o.imageUrl; // dormant, ignored on render, preserved for a future revival
+          return out;
+        }) : [],
+        picks: picks,
+        enabledMeals: enabled,
         showWeekends: doc.showWeekends === true,
         updatedAt: doc.updatedAt || nowIso()
       };
@@ -533,7 +641,7 @@
       return '<span class="em">' + esc(o.emoji || '🍽️') + '</span>';
     }
     // ---- responsive week window (Part 2): the visible days start at
-    // the next lunch to pick and grow with the widget's actual width.
+    // the next meal to pick and grow with the widget's actual width.
     // Fit count: one day card needs ~170px to stay usable, so the count
     // is floor(width / 170), at least 1, capped at the week's days.
     function fitCount(total) {
@@ -549,8 +657,8 @@
         var containsToday = false;
         for (var j = 0; j < days.length; j++) { if (dateKey(days[j]) === tk) containsToday = true; }
         if (containsToday) {
-          // This week's lunches are done (e.g. Friday, weekends hidden):
-          // advance to next week so the window shows the next lunch to pick.
+          // This week's meals are done (e.g. Friday, weekends hidden):
+          // advance to next week so the window shows the next meal to pick.
           weekMonday = addDays(weekMonday, 7);
           days = visibleDays();
           ai = 0;
@@ -573,17 +681,18 @@
       if (!visiblePeople().length || !todayIsChoosable()) { box.classList.add('hidden'); return; }
       box.classList.remove('hidden');
       var html = '<h2>Today — ' + esc(fmtDay(new Date())) + '</h2>';
+      var lunchOn = isMealEnabled('lunch');
       visiblePeople().forEach(function (p) {
-        var cid = choiceFor(tk, p.id);
-        var o = cid ? optionById(cid) : null;
-        var row = '<div class="todayrow">' + personLabel(p) + '<span class="choice">' +
-          (o ? optionVisual(o) + ' ' + esc(o.name) : '<span class="none">Not chosen yet</span>') + '</span>';
-        if (state.snackChoicesEnabled) {
-          var scid = choiceForMeal(tk, p.id, 'snack');
-          var so = scid ? optionById(scid) : null;
-          row += '<span class="choice">🍿 ' + (so ? optionVisual(so) + ' ' + esc(so.name) : '<span class="none">No snack yet</span>') + '</span>';
-        }
-        html += row + '</div>';
+        enabledMealDefs().forEach(function (m) {
+          var cid = choiceForMeal(tk, p.id, m.id);
+          var o = cid ? optionById(cid) : null;
+          var row = '<div class="todayrow">';
+          if (m.id === 'lunch' || !lunchOn) row += personLabel(p);
+          if (m.id !== 'lunch') row += '<span class="choice">' + m.emoji + ' ' + esc(m.label) + '</span>';
+          row += '<span class="choice">' +
+            (o ? optionVisual(o) + ' ' + esc(o.name) : '<span class="none">' + (m.id === 'lunch' ? 'Not chosen yet' : 'No ' + m.label.toLowerCase() + ' yet') + '</span>') + '</span>';
+          html += row + '</div>';
+        });
       });
       box.innerHTML = html;
     }
@@ -593,12 +702,12 @@
       var banner = $('emptyBanner');
       if (!selectedPeople().length) {
         banner.classList.remove('hidden');
-        banner.innerHTML = 'No lunch choosers yet. Select the household users who choose lunch in Manage.' +
+        banner.innerHTML = 'No meal choosers yet. Select the household users who choose meals in Manage.' +
           ' <button type="button" class="navbtn" id="bannerManage">Manage</button>';
         $('bannerManage').addEventListener('click', function () { setView('manage'); });
       } else if (!state.options.length) {
         banner.classList.remove('hidden');
-        banner.innerHTML = 'No lunch options yet. Add options in Manage so there is something to choose from.' +
+        banner.innerHTML = 'No meal options yet. Add options in Manage so there is something to choose from.' +
           ' <button type="button" class="navbtn" id="bannerManage">Manage</button>';
         $('bannerManage').addEventListener('click', function () { setView('manage'); });
       } else {
@@ -618,23 +727,21 @@
         var isPast = isPastKey(key);
         html += '<button type="button" class="daycard' + (isToday ? ' today' : '') + (isPast ? ' past' : '') + '"' +
           (isPast ? ' disabled aria-disabled="true"' : '') +
-          ' data-date="' + key + '" aria-label="Choose lunch for ' + esc(fmtDay(d)) + '">' +
+          ' data-date="' + key + '" aria-label="Choose meals for ' + esc(fmtDay(d)) + '">' +
           '<div class="dow">' + esc(d.toLocaleDateString('en-US', { weekday: 'short' })) +
           (isToday ? ' <span class="todaypill">• Today</span>' : '') + '</div>' +
           '<div class="dnum">' + d.getDate() + '</div>';
+        var lunchOn = isMealEnabled('lunch');
         visiblePeople().forEach(function (p) {
-          var cid = choiceFor(key, p.id);
-          var o = cid ? optionById(cid) : null;
-          html += '<div class="daychoice">' + personLabel(p) +
-            (o ? '<span>' + optionVisual(o) + ' ' + esc(o.name) + '</span>' :
+          enabledMealDefs().forEach(function (m) {
+            var cid = choiceForMeal(key, p.id, m.id);
+            var o = cid ? optionById(cid) : null;
+            html += '<div class="daychoice">';
+            if (m.id === 'lunch' || !lunchOn) html += personLabel(p);
+            if (m.id !== 'lunch') html += '<span class="meallabel">' + m.emoji + ' ' + esc(m.label) + '</span>';
+            html += (o ? '<span>' + optionVisual(o) + ' ' + esc(o.name) + '</span>' :
               '<span class="none">—</span>') + '</div>';
-          if (state.snackChoicesEnabled) {
-            var scid = choiceForMeal(key, p.id, 'snack');
-            var so = scid ? optionById(scid) : null;
-            html += '<div class="daychoice"><span class="snacklabel">🍿 Snack</span>' +
-              (so ? '<span>' + optionVisual(so) + ' ' + esc(so.name) + '</span>' :
-                '<span class="none">—</span>') + '</div>';
-          }
+          });
         });
         html += '</button>';
       }
@@ -657,7 +764,7 @@
       } else if (!coreUsers.length) {
         pl.innerHTML = '<p class="hint">Loading household users…</p>';
       } else {
-        pl.innerHTML = '<p class="hint">Select the household users who choose lunch. There is no create-person form — the household list is the source.</p>' +
+        pl.innerHTML = '<p class="hint">Select the household users who choose meals. There is no create-person form — the household list is the source.</p>' +
           coreUsers.map(function (u) {
             var p = userPerson(u);
             var chosen = !!selIds[u.id];
@@ -677,14 +784,14 @@
       }
       var ol = $('optionsList');
       if (!state.options.length) {
-        ol.innerHTML = '<p class="hint">No options yet. Add the lunches and snacks parents pack.</p>';
+        ol.innerHTML = '<p class="hint">No options yet. Add the meals parents pack.</p>';
       } else {
         ol.innerHTML = state.options.map(function (o) {
-          var servesLabel = servesOf(o) === 'both' ? 'Lunch + Snack' : servesOf(o) === 'snack' ? 'Snack' : 'Lunch';
+          var mealNames = mealsOf(o).map(function (id) { return mealLabel(id); }).join(' + ');
           return '<div class="mrow"><span class="em">' + esc(o.emoji || '🍽️') + '</span>' +
             '<span class="dot" style="background:' + esc(o.color || '#999') + '"></span>' +
             '<span class="nm">' + esc(o.name) + '</span>' +
-            '<span class="servebadge">' + servesLabel + '</span>' +
+            '<span class="mealbadge">' + esc(mealNames) + '</span>' +
             '<button type="button" class="smallbtn" data-edit-option="' + esc(o.id) + '">Edit</button>' +
             '<button type="button" class="smallbtn danger" data-del-option="' + esc(o.id) + '">Delete</button></div>';
         }).join('');
@@ -692,9 +799,12 @@
       var ds = $('displaySettings');
       var filter = loadFilter();
       var dhtml = '<div class="mrow"><input type="checkbox" id="weekendToggle"' + (state.showWeekends ? ' checked' : '') + '><span class="flabel">Show Saturday and Sunday</span></div>' +
-        '<p class="hint">School lunches are Monday–Friday by default. This weekend setting is shared with every display.</p>' +
-        '<div class="mrow"><input type="checkbox" id="snackToggle"' + (state.snackChoicesEnabled ? ' checked' : '') + '><span class="flabel">Kids also pick a snack</span></div>' +
-        '<p class="hint">When on, each day also has a snack pick, from snack options. This setting is shared with every display; turning it off hides snack picks but keeps them saved.</p>' +
+        '<p class="hint">School days are Monday–Friday by default. This weekend setting is shared with every display.</p>' +
+        '<h2>Meals</h2>' +
+        '<p class="hint">Each meal gets its own pick per day. Turning a meal off hides it everywhere but keeps its saved picks — turning it back on restores them. This setting is shared with every display. At least one meal stays on.</p>' +
+        MEALS.map(function (m) {
+          return '<div class="mrow"><input type="checkbox" data-meal-toggle="' + m.id + '"' + (isMealEnabled(m.id) ? ' checked' : '') + '><span class="flabel">' + m.emoji + ' ' + m.label + '</span></div>';
+        }).join('') +
         '<h2>On this display</h2>' +
         '<p class="hint">Uncheck someone to hide them on this display only. Other displays are not affected. Checking everyone again shows everyone here (and you cannot hide everybody — clearing all resets to everyone).</p>';
       if (!sel.length) {
@@ -711,9 +821,16 @@
         state.showWeekends = $('weekendToggle').checked;
         save().then(function () { renderAll(); });
       });
-      $('snackToggle').addEventListener('change', function () {
-        state.snackChoicesEnabled = $('snackToggle').checked;
-        save().then(function () { renderAll(); });
+      ds.querySelectorAll('[data-meal-toggle]').forEach(function (cb) {
+        cb.addEventListener('change', function () {
+          var meal = cb.getAttribute('data-meal-toggle');
+          var ids = (state.enabledMeals || []).slice();
+          if (cb.checked) { if (ids.indexOf(meal) === -1) ids.push(meal); }
+          else ids = ids.filter(function (x) { return x !== meal; });
+          if (!ids.length) { cb.checked = true; renderManage(); return; } // keep at least one meal
+          state.enabledMeals = MEALS.filter(function (m) { return ids.indexOf(m.id) !== -1; }).map(function (m) { return m.id; });
+          save().then(function () { renderAll(); });
+        });
       });
       ds.querySelectorAll('[data-filter-person]').forEach(function (cb) {
         cb.addEventListener('change', function () {
@@ -740,14 +857,11 @@
         clearTimeout(armedDelete[key]);
         delete armedDelete[key];
         state.options = state.options.filter(function (o) { return o.id !== id; });
-        Object.keys(state.choices || {}).forEach(function (dk) {
-          Object.keys(state.choices[dk]).forEach(function (pid) {
-            if (state.choices[dk][pid] === id) delete state.choices[dk][pid];
-          });
-        });
-        Object.keys(state.snackChoices || {}).forEach(function (dk) {
-          Object.keys(state.snackChoices[dk]).forEach(function (pid) {
-            if (state.snackChoices[dk][pid] === id) delete state.snackChoices[dk][pid];
+        Object.keys(state.picks || {}).forEach(function (meal) {
+          Object.keys(state.picks[meal] || {}).forEach(function (dk) {
+            Object.keys(state.picks[meal][dk]).forEach(function (pid) {
+              if (state.picks[meal][dk][pid] === id) delete state.picks[meal][dk][pid];
+            });
           });
         });
         save().then(function () { renderManage(); renderWeek(); });
@@ -816,10 +930,10 @@
     function openChoiceDialog(key) {
       if (!visiblePeople().length || !state.options.length) { setView('manage'); return; }
       dialogDateKey = key;
-      dialogMeal = 'lunch';
+      dialogMeal = (enabledMealDefs()[0] || { id: 'lunch' }).id;
       var vis = visiblePeople();
-      var withChoice = vis.filter(function (p) { return choiceFor(key, p.id); });
-      var without = vis.filter(function (p) { return !choiceFor(key, p.id); });
+      var withChoice = vis.filter(function (p) { return choiceForMeal(key, p.id, dialogMeal); });
+      var without = vis.filter(function (p) { return !choiceForMeal(key, p.id, dialogMeal); });
       dialogPersonId = (without[0] || vis[0]).id;
       renderChoiceDialog();
       openDialog($('choiceDialog'));
@@ -827,25 +941,26 @@
     function renderChoiceDialog() {
       var key = dialogDateKey;
       var mealEl = $('choiceMeal');
-      if (state.snackChoicesEnabled) {
+      var tabs = enabledMealDefs();
+      if (tabs.length > 1) {
         mealEl.innerHTML = '';
-        [['lunch', 'Lunch'], ['snack', 'Snack']].forEach(function (pair) {
+        tabs.forEach(function (m) {
           var b = document.createElement('button');
           b.type = 'button';
           b.className = 'mealbtn';
-          b.textContent = pair[1];
-          b.setAttribute('aria-pressed', dialogMeal === pair[0] ? 'true' : 'false');
-          b.addEventListener('click', function () { dialogMeal = pair[0]; renderChoiceDialog(); });
+          b.textContent = m.label;
+          b.setAttribute('aria-pressed', dialogMeal === m.id ? 'true' : 'false');
+          b.addEventListener('click', function () { dialogMeal = m.id; renderChoiceDialog(); });
           mealEl.appendChild(b);
         });
       } else {
         mealEl.innerHTML = '';
-        dialogMeal = 'lunch';
+        dialogMeal = tabs.length ? tabs[0].id : 'lunch';
       }
       var d = new Date();
       var parts = key.split('-');
       d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
-      $('choiceTitle').textContent = 'Choose ' + dialogMeal + ' — ' + fmtDay(d);
+      $('choiceTitle').textContent = 'Choose ' + mealLabel(dialogMeal) + ' — ' + fmtDay(d);
       var peopleEl = $('choicePeople');
       peopleEl.innerHTML = '';
       visiblePeople().forEach(function (p) {
@@ -861,10 +976,9 @@
       });
       var optsEl = $('choiceOptions');
       optsEl.innerHTML = '';
-      var mealOptions = state.options.filter(function (o) { return servesMeal(o, dialogMeal); });
+      var mealOptions = state.options.filter(function (o) { return optionHasMeal(o, dialogMeal); });
       if (!mealOptions.length) {
-        optsEl.innerHTML = '<p class="hint">' + (dialogMeal === 'snack' ?
-          'No snack options yet — add some in Manage.' : 'No lunch options yet — add some in Manage.') + '</p>';
+        optsEl.innerHTML = '<p class="hint">No ' + mealLabel(dialogMeal).toLowerCase() + ' options yet — add some in Manage.</p>';
         return;
       }
       mealOptions.forEach(function (o) {
@@ -874,7 +988,7 @@
         b.style.borderColor = o.color || '';
         b.innerHTML = optionVisual(o) + '<span class="nm">' + esc(o.name) + '</span>';
         b.addEventListener('click', function () {
-          var map = mealChoices(dialogMeal);
+          var map = mealPicks(dialogMeal);
           if (!map[key]) map[key] = {};
           map[key][dialogPersonId] = o.id;
           save().then(function () {
@@ -895,24 +1009,31 @@
       $('optionEmojiCustom').value = o ? (o.emoji || '') : '';
       var cur = o ? (o.emoji || '🍽️') : '🍽️';
       var col = o ? (o.color || COLORS[0]) : COLORS[0];
-      pickRow($('optionEmojiPick'), FOOD_EMOJI, cur, function (v) { $('optionEmojiCustom').value = v; });
+      dialogEmojiManual = !!o; // edits keep their emoji; only new options auto-default
+      pickRow($('optionEmojiPick'), FOOD_EMOJI, cur, function (v) { dialogEmojiManual = true; $('optionEmojiCustom').value = v; });
       colorRow($('optionColorPick'), col, function (c) { $('optionColorPick').dataset.picked = c; });
       $('optionColorPick').dataset.picked = col;
-      dialogServes = o ? servesOf(o) : 'lunch';
-      var servesEl = $('optionServesPick');
-      servesEl.innerHTML = '';
-      [['lunch', 'Lunch only'], ['snack', 'Snack only'], ['both', 'Both']].forEach(function (pair) {
+      dialogMeals = o ? mealsOf(o).slice() : ['lunch'];
+      var mealsEl = $('optionMealsPick');
+      mealsEl.innerHTML = '';
+      MEALS.forEach(function (m) {
         var b = document.createElement('button');
         b.type = 'button';
         b.className = 'mealbtn';
-        b.textContent = pair[1];
-        b.setAttribute('aria-pressed', dialogServes === pair[0] ? 'true' : 'false');
+        b.textContent = m.emoji + ' ' + m.label;
+        b.dataset.meal = m.id;
+        b.setAttribute('aria-pressed', dialogMeals.indexOf(m.id) !== -1 ? 'true' : 'false');
         b.addEventListener('click', function () {
-          dialogServes = pair[0];
-          Array.prototype.forEach.call(servesEl.children, function (x) { x.setAttribute('aria-pressed', 'false'); });
-          b.setAttribute('aria-pressed', 'true');
+          var i = dialogMeals.indexOf(m.id);
+          if (i !== -1) {
+            if (dialogMeals.length === 1) return; // keep at least one meal tagged
+            dialogMeals.splice(i, 1);
+          } else dialogMeals.push(m.id);
+          Array.prototype.forEach.call(mealsEl.children, function (x) {
+            x.setAttribute('aria-pressed', dialogMeals.indexOf(x.dataset.meal) !== -1 ? 'true' : 'false');
+          });
         });
-        servesEl.appendChild(b);
+        mealsEl.appendChild(b);
       });
       openDialog($('optionDialog'));
       setTimeout(function () { $('optionName').focus(); }, 50);
@@ -933,7 +1054,7 @@
       $('choiceDialog').addEventListener('close', function () { dialogOpen = false; renderAll(); });
       $('clearChoiceBtn').addEventListener('click', function () {
         if (dialogDateKey && dialogPersonId) {
-          var map = mealChoices(dialogMeal);
+          var map = mealPicks(dialogMeal);
           if (map[dialogDateKey]) delete map[dialogDateKey][dialogPersonId];
           save().then(function () { renderChoiceDialog(); renderWeek(); });
         }
@@ -943,10 +1064,10 @@
         if (!name) { $('optionName').focus(); return; }
         var emoji = ($('optionEmojiCustom').value.trim() || '🍽️').slice(0, 4);
         var color = $('optionColorPick').dataset.picked || COLORS[0];
-        var data = { name: name, emoji: emoji, color: color, serves: dialogServes };
+        var data = { name: name, emoji: emoji, color: color, meals: dialogMeals.slice() };
         if (editingOptionId) {
           var o = optionById(editingOptionId);
-          if (o) { o.name = data.name; o.emoji = data.emoji; o.color = data.color; o.serves = data.serves; }
+          if (o) { o.name = data.name; o.emoji = data.emoji; o.color = data.color; o.meals = data.meals; delete o.serves; }
         } else {
           state.options.push(Object.assign({ id: uid() }, data));
         }
@@ -954,6 +1075,18 @@
         save().then(function () { closeDialog($('optionDialog')); });
       });
       $('optionCancelBtn').addEventListener('click', function () { closeDialog($('optionDialog')); });
+      // Auto-default emoji: while adding a new option and no emoji has
+      // been picked by hand, a close name match pre-fills the emoji
+      // (and the picker row when the emoji is in it); no match clears
+      // back to unset. A manual pick — picker tap or typing in the
+      // custom field — stops auto-updating for this option.
+      $('optionName').addEventListener('input', function () {
+        if (editingOptionId || dialogEmojiManual) return;
+        var em = matchFoodEmoji($('optionName').value);
+        $('optionEmojiCustom').value = em;
+        syncEmojiPick(em);
+      });
+      $('optionEmojiCustom').addEventListener('input', function () { dialogEmojiManual = true; });
       $('optionDialog').addEventListener('close', function () { dialogOpen = false; renderAll(); });
     }
     function poll() {
