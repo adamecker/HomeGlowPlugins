@@ -182,16 +182,19 @@ with no field become `["lunch"]`; `choices` becomes `picks.lunch`
 and `snackChoices` becomes `picks.snack`; `snackChoicesEnabled: true`
 becomes `enabledMeals: ["lunch", "snack"]`, while absent or false
 becomes `["lunch"]`. The next save persists the meals shape. The
-plugin file is still `LunchChoice.html` and the storage key is still
-`lunch-choice` — only the display name changed to Meal Choice — so
-existing documents, options, and picks carry straight over.
+plugin was renamed from `LunchChoice.html` (storage key
+`lunch-choice`) to `MealChoice.html` (storage key `meal-choice`):
+the document is copied across under the new key with every field
+intact, so existing documents, options, and picks carry straight
+over. The per-display filter key was renamed with it, so a display
+that had filtered people shows everyone until it is re-filtered.
 Documents saved before the household-users change carry a legacy
 `people` array and choices keyed by custom person ids; those are
 preserved in the document untouched on save but are no longer
 rendered — the meal set is now `selectedUserIds`, and picks render
 only for selected household users. The per-display people filter is
 not in this document at all — it lives in the display's localStorage
-shim under `homeglowLunchChoice.displayPeople` (an array of
+shim under `homeglowMealChoice.displayPeople` (an array of
 `"u" + <user id>` strings; missing or empty means everyone selected).
 
 ## What it doesn't do
