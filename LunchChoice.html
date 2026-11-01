@@ -10,6 +10,9 @@
     Today highlighted when visible, past days locked. Tap a day and each
     person chooses their lunch from parent-managed options. A choice is
     per day, per person, so several people choose independently.
+    When snack picks are enabled (Manage, off by default), each day
+    also has a snack pick per person, from snack options. Lunch and
+    snack picks are independent: changing one never touches the other.
     A display can also show only some people (a per-display filter stored
     on the display itself, not in the shared doc) - see LunchChoice.md.
 
@@ -39,16 +42,25 @@
       HomeGlow.storage key "data", value:
         { version: 1,
           selectedUserIds: [ <core user id, number> ],
-          options: [ { id, name, emoji, color } ],  // older docs may carry imageUrl, now ignored
+          options: [ { id, name, emoji, color, serves } ],  // older docs may carry imageUrl, now ignored
           choices: { "YYYY-MM-DD": { "u<userId>": "<optionId>" } },
+          snackChoices: { "YYYY-MM-DD": { "u<userId>": "<optionId>" } },
+          snackChoicesEnabled: false,
           showWeekends: false,
           updatedAt: ISO timestamp }
+    An option's `serves` is 'lunch', 'snack', or 'both'; options
+    without serves count as 'lunch', so older documents need no
+    rewrite. snackChoices mirrors choices exactly (per day, per
+    person); snackChoicesEnabled defaults to false, and while it is
+    off no snack UI renders and no snack data is written.
     The legacy `people` array and choices keyed by custom person ids,
     from before users came from the household list, are preserved in
     the document untouched on save but are no longer rendered.
     showWeekends is household-wide (all displays share it); the per-display
     people filter lives in this display's localStorage shim only, never in
-    the shared doc. Older docs without showWeekends default to false.
+    the shared doc. The snack toggle (snackChoicesEnabled) is household-wide
+    too: turning it off hides snack picks everywhere but keeps them saved.
+    Older docs without showWeekends default to false.
     Choices are local dates (YYYY-MM-DD from local parts, never UTC).
     The widget polls storage (default every 10s, setting `pollSeconds`)
     so choices from another display appear without a reload. Polling
@@ -202,6 +214,17 @@
     .optbtn.chosen { outline: 3px solid var(--accent, #4a90d9); outline-offset: 1px; }
     .optbtn .em { font-size: 2.2rem; line-height: 1; }
     .optbtn .nm { font-size: 0.85rem; font-weight: 600; text-align: center; overflow-wrap: anywhere; }
+    .servebadge {
+      font-size: 0.75rem; font-weight: 600; border: 1px solid var(--border, #ccc);
+      border-radius: 999px; padding: 0.15rem 0.5rem; flex: none; white-space: nowrap;
+    }
+    .mealrow { display: flex; gap: 0.35rem; margin: 0.25rem 0 0.5rem; flex-wrap: wrap; }
+    .mealbtn {
+      border: 1px solid var(--border, #ccc); border-radius: 999px; background: transparent;
+      color: inherit; padding: 0.4rem 0.9rem; min-height: 40px; font-weight: 600;
+    }
+    .mealbtn[aria-pressed="true"] { outline: 3px solid var(--accent, #4a90d9); outline-offset: 1px; }
+    .daychoice .snacklabel { font-size: 0.8rem; opacity: 0.75; }
     .dlgfoot { display: flex; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap; }
     .dlgfoot .spacer { flex: 1; }
     .hint { font-size: 0.85rem; opacity: 0.75; }
@@ -232,7 +255,7 @@
       <button type="button" class="navbtn" id="backBtn">‹ Back to week</button>
       <h2>People</h2>
       <div id="peopleList"></div>
-      <h2>Lunch options</h2>
+      <h2>Options</h2>
       <div id="optionsList"></div>
       <button type="button" class="addbtn" id="addOptionBtn">+ Add option</button>
       <h2>Week view</h2>
@@ -242,8 +265,9 @@
     <div class="sync" id="syncLine" role="status"></div>
   </div>
 
-  <dialog id="choiceDialog" aria-label="Choose lunch">
+  <dialog id="choiceDialog" aria-label="Choose lunch or snack">
     <h2 id="choiceTitle">Choose lunch</h2>
+    <div class="mealrow" id="choiceMeal"></div>
     <div class="pickrow" id="choicePeople"></div>
     <div class="optgrid" id="choiceOptions"></div>
     <div class="dlgfoot">
@@ -253,7 +277,7 @@
     </div>
   </dialog>
 
-  <dialog id="optionDialog" aria-label="Lunch option">
+  <dialog id="optionDialog" aria-label="Option">
     <h2 id="optionTitle">Add option</h2>
     <label for="optionName">Name</label>
     <input type="text" id="optionName" maxlength="80" autocomplete="off">
@@ -263,6 +287,8 @@
     <input type="text" id="optionEmojiCustom" maxlength="12" autocomplete="off" placeholder="🍽️">
     <label>Color</label>
     <div class="pickrow" id="optionColorPick"></div>
+    <label>Used for</label>
+    <div class="mealrow" id="optionServesPick"></div>
     <div class="dlgfoot">
       <button type="button" class="navbtn" id="optionSaveBtn">Save</button>
       <button type="button" class="smallbtn" id="optionCancelBtn">Cancel</button>
@@ -286,6 +312,8 @@
     var view = 'week'; // 'week' | 'manage'
     var dialogDateKey = null;
     var dialogPersonId = null;
+    var dialogMeal = 'lunch'; // 'lunch' | 'snack': which pick the choice dialog is setting
+    var dialogServes = 'lunch'; // 'lunch' | 'snack' | 'both': serves value being edited in the option dialog
     var editingOptionId = null;
     var dialogOpen = false;
     var recoveryPending = false;
@@ -396,6 +424,26 @@
       var day = (state.choices || {})[dateKeyStr] || {};
       return day[personId] || null;
     }
+    // serves: 'lunch' | 'snack' | 'both'. Options saved before serves
+    // existed carry no field and count as lunch, so older documents
+    // need no rewrite.
+    function servesOf(o) {
+      if (o && (o.serves === 'snack' || o.serves === 'both')) return o.serves;
+      return 'lunch';
+    }
+    function servesMeal(o, meal) {
+      var s = servesOf(o);
+      return meal === 'snack' ? (s === 'snack' || s === 'both') : (s === 'lunch' || s === 'both');
+    }
+    function mealChoices(meal) {
+      if (meal === 'snack') { if (!state.snackChoices) state.snackChoices = {}; return state.snackChoices; }
+      if (!state.choices) state.choices = {};
+      return state.choices;
+    }
+    function choiceForMeal(dateKeyStr, personId, meal) {
+      var day = mealChoices(meal)[dateKeyStr] || {};
+      return day[personId] || null;
+    }
 
     // ---- storage: SDK first, localStorage fallback (standalone preview) ----
     function sdkOk() {
@@ -439,7 +487,7 @@
     function defaultState() {
       // First run starts with nobody selected: select users in Manage.
       // No example names — nothing here may look like household data.
-      return { version: 1, selectedUserIds: [], options: [], choices: {}, showWeekends: false, updatedAt: nowIso() };
+      return { version: 1, selectedUserIds: [], options: [], choices: {}, snackChoices: {}, snackChoicesEnabled: false, showWeekends: false, updatedAt: nowIso() };
     }
     function normalize(doc) {
       if (!doc || typeof doc !== 'object') return defaultState();
@@ -451,6 +499,8 @@
         people: Array.isArray(doc.people) ? doc.people.filter(function (p) { return p && p.id && p.name; }) : [],
         options: Array.isArray(doc.options) ? doc.options.filter(function (o) { return o && o.id && o.name; }) : [],
         choices: (doc.choices && typeof doc.choices === 'object') ? doc.choices : {},
+        snackChoices: (doc.snackChoices && typeof doc.snackChoices === 'object') ? doc.snackChoices : {},
+        snackChoicesEnabled: doc.snackChoicesEnabled === true,
         showWeekends: doc.showWeekends === true,
         updatedAt: doc.updatedAt || nowIso()
       };
@@ -526,8 +576,14 @@
       visiblePeople().forEach(function (p) {
         var cid = choiceFor(tk, p.id);
         var o = cid ? optionById(cid) : null;
-        html += '<div class="todayrow">' + personLabel(p) + '<span class="choice">' +
-          (o ? optionVisual(o) + ' ' + esc(o.name) : '<span class="none">Not chosen yet</span>') + '</span></div>';
+        var row = '<div class="todayrow">' + personLabel(p) + '<span class="choice">' +
+          (o ? optionVisual(o) + ' ' + esc(o.name) : '<span class="none">Not chosen yet</span>') + '</span>';
+        if (state.snackChoicesEnabled) {
+          var scid = choiceForMeal(tk, p.id, 'snack');
+          var so = scid ? optionById(scid) : null;
+          row += '<span class="choice">🍿 ' + (so ? optionVisual(so) + ' ' + esc(so.name) : '<span class="none">No snack yet</span>') + '</span>';
+        }
+        html += row + '</div>';
       });
       box.innerHTML = html;
     }
@@ -572,6 +628,13 @@
           html += '<div class="daychoice">' + personLabel(p) +
             (o ? '<span>' + optionVisual(o) + ' ' + esc(o.name) + '</span>' :
               '<span class="none">—</span>') + '</div>';
+          if (state.snackChoicesEnabled) {
+            var scid = choiceForMeal(key, p.id, 'snack');
+            var so = scid ? optionById(scid) : null;
+            html += '<div class="daychoice"><span class="snacklabel">🍿 Snack</span>' +
+              (so ? '<span>' + optionVisual(so) + ' ' + esc(so.name) + '</span>' :
+                '<span class="none">—</span>') + '</div>';
+          }
         });
         html += '</button>';
       }
@@ -614,12 +677,14 @@
       }
       var ol = $('optionsList');
       if (!state.options.length) {
-        ol.innerHTML = '<p class="hint">No lunch options yet. Add the lunches parents pack.</p>';
+        ol.innerHTML = '<p class="hint">No options yet. Add the lunches and snacks parents pack.</p>';
       } else {
         ol.innerHTML = state.options.map(function (o) {
+          var servesLabel = servesOf(o) === 'both' ? 'Lunch + Snack' : servesOf(o) === 'snack' ? 'Snack' : 'Lunch';
           return '<div class="mrow"><span class="em">' + esc(o.emoji || '🍽️') + '</span>' +
             '<span class="dot" style="background:' + esc(o.color || '#999') + '"></span>' +
             '<span class="nm">' + esc(o.name) + '</span>' +
+            '<span class="servebadge">' + servesLabel + '</span>' +
             '<button type="button" class="smallbtn" data-edit-option="' + esc(o.id) + '">Edit</button>' +
             '<button type="button" class="smallbtn danger" data-del-option="' + esc(o.id) + '">Delete</button></div>';
         }).join('');
@@ -628,6 +693,8 @@
       var filter = loadFilter();
       var dhtml = '<div class="mrow"><input type="checkbox" id="weekendToggle"' + (state.showWeekends ? ' checked' : '') + '><span class="flabel">Show Saturday and Sunday</span></div>' +
         '<p class="hint">School lunches are Monday–Friday by default. This weekend setting is shared with every display.</p>' +
+        '<div class="mrow"><input type="checkbox" id="snackToggle"' + (state.snackChoicesEnabled ? ' checked' : '') + '><span class="flabel">Kids also pick a snack</span></div>' +
+        '<p class="hint">When on, each day also has a snack pick, from snack options. This setting is shared with every display; turning it off hides snack picks but keeps them saved.</p>' +
         '<h2>On this display</h2>' +
         '<p class="hint">Uncheck someone to hide them on this display only. Other displays are not affected. Checking everyone again shows everyone here (and you cannot hide everybody — clearing all resets to everyone).</p>';
       if (!sel.length) {
@@ -642,6 +709,10 @@
       ds.innerHTML = dhtml;
       $('weekendToggle').addEventListener('change', function () {
         state.showWeekends = $('weekendToggle').checked;
+        save().then(function () { renderAll(); });
+      });
+      $('snackToggle').addEventListener('change', function () {
+        state.snackChoicesEnabled = $('snackToggle').checked;
         save().then(function () { renderAll(); });
       });
       ds.querySelectorAll('[data-filter-person]').forEach(function (cb) {
@@ -672,6 +743,11 @@
         Object.keys(state.choices || {}).forEach(function (dk) {
           Object.keys(state.choices[dk]).forEach(function (pid) {
             if (state.choices[dk][pid] === id) delete state.choices[dk][pid];
+          });
+        });
+        Object.keys(state.snackChoices || {}).forEach(function (dk) {
+          Object.keys(state.snackChoices[dk]).forEach(function (pid) {
+            if (state.snackChoices[dk][pid] === id) delete state.snackChoices[dk][pid];
           });
         });
         save().then(function () { renderManage(); renderWeek(); });
@@ -740,19 +816,36 @@
     function openChoiceDialog(key) {
       if (!visiblePeople().length || !state.options.length) { setView('manage'); return; }
       dialogDateKey = key;
+      dialogMeal = 'lunch';
       var vis = visiblePeople();
       var withChoice = vis.filter(function (p) { return choiceFor(key, p.id); });
       var without = vis.filter(function (p) { return !choiceFor(key, p.id); });
       dialogPersonId = (without[0] || vis[0]).id;
-      var d = new Date();
-      var parts = key.split('-');
-      d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
-      $('choiceTitle').textContent = 'Choose lunch — ' + fmtDay(d);
       renderChoiceDialog();
       openDialog($('choiceDialog'));
     }
     function renderChoiceDialog() {
       var key = dialogDateKey;
+      var mealEl = $('choiceMeal');
+      if (state.snackChoicesEnabled) {
+        mealEl.innerHTML = '';
+        [['lunch', 'Lunch'], ['snack', 'Snack']].forEach(function (pair) {
+          var b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'mealbtn';
+          b.textContent = pair[1];
+          b.setAttribute('aria-pressed', dialogMeal === pair[0] ? 'true' : 'false');
+          b.addEventListener('click', function () { dialogMeal = pair[0]; renderChoiceDialog(); });
+          mealEl.appendChild(b);
+        });
+      } else {
+        mealEl.innerHTML = '';
+        dialogMeal = 'lunch';
+      }
+      var d = new Date();
+      var parts = key.split('-');
+      d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+      $('choiceTitle').textContent = 'Choose ' + dialogMeal + ' — ' + fmtDay(d);
       var peopleEl = $('choicePeople');
       peopleEl.innerHTML = '';
       visiblePeople().forEach(function (p) {
@@ -760,7 +853,7 @@
         b.type = 'button';
         b.className = 'personchip';
         b.setAttribute('aria-pressed', p.id === dialogPersonId ? 'true' : 'false');
-        var has = !!choiceFor(key, p.id);
+        var has = !!choiceForMeal(key, p.id, dialogMeal);
         b.innerHTML = avatarHtml(p, 'avatar') +
           '<span>' + esc(p.name) + (has ? ' ✓' : '') + '</span>';
         b.addEventListener('click', function () { dialogPersonId = p.id; renderChoiceDialog(); });
@@ -768,17 +861,24 @@
       });
       var optsEl = $('choiceOptions');
       optsEl.innerHTML = '';
-      state.options.forEach(function (o) {
+      var mealOptions = state.options.filter(function (o) { return servesMeal(o, dialogMeal); });
+      if (!mealOptions.length) {
+        optsEl.innerHTML = '<p class="hint">' + (dialogMeal === 'snack' ?
+          'No snack options yet — add some in Manage.' : 'No lunch options yet — add some in Manage.') + '</p>';
+        return;
+      }
+      mealOptions.forEach(function (o) {
         var b = document.createElement('button');
         b.type = 'button';
-        b.className = 'optbtn' + (choiceFor(key, dialogPersonId) === o.id ? ' chosen' : '');
+        b.className = 'optbtn' + (choiceForMeal(key, dialogPersonId, dialogMeal) === o.id ? ' chosen' : '');
         b.style.borderColor = o.color || '';
         b.innerHTML = optionVisual(o) + '<span class="nm">' + esc(o.name) + '</span>';
         b.addEventListener('click', function () {
-          if (!state.choices[key]) state.choices[key] = {};
-          state.choices[key][dialogPersonId] = o.id;
+          var map = mealChoices(dialogMeal);
+          if (!map[key]) map[key] = {};
+          map[key][dialogPersonId] = o.id;
           save().then(function () {
-            var next = visiblePeople().filter(function (p) { return !choiceFor(key, p.id); })[0];
+            var next = visiblePeople().filter(function (p) { return !choiceForMeal(key, p.id, dialogMeal); })[0];
             if (next) dialogPersonId = next.id;
             renderChoiceDialog();
             renderWeek();
@@ -798,6 +898,22 @@
       pickRow($('optionEmojiPick'), FOOD_EMOJI, cur, function (v) { $('optionEmojiCustom').value = v; });
       colorRow($('optionColorPick'), col, function (c) { $('optionColorPick').dataset.picked = c; });
       $('optionColorPick').dataset.picked = col;
+      dialogServes = o ? servesOf(o) : 'lunch';
+      var servesEl = $('optionServesPick');
+      servesEl.innerHTML = '';
+      [['lunch', 'Lunch only'], ['snack', 'Snack only'], ['both', 'Both']].forEach(function (pair) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'mealbtn';
+        b.textContent = pair[1];
+        b.setAttribute('aria-pressed', dialogServes === pair[0] ? 'true' : 'false');
+        b.addEventListener('click', function () {
+          dialogServes = pair[0];
+          Array.prototype.forEach.call(servesEl.children, function (x) { x.setAttribute('aria-pressed', 'false'); });
+          b.setAttribute('aria-pressed', 'true');
+        });
+        servesEl.appendChild(b);
+      });
       openDialog($('optionDialog'));
       setTimeout(function () { $('optionName').focus(); }, 50);
     }
@@ -816,8 +932,9 @@
       });
       $('choiceDialog').addEventListener('close', function () { dialogOpen = false; renderAll(); });
       $('clearChoiceBtn').addEventListener('click', function () {
-        if (dialogDateKey && dialogPersonId && state.choices[dialogDateKey]) {
-          delete state.choices[dialogDateKey][dialogPersonId];
+        if (dialogDateKey && dialogPersonId) {
+          var map = mealChoices(dialogMeal);
+          if (map[dialogDateKey]) delete map[dialogDateKey][dialogPersonId];
           save().then(function () { renderChoiceDialog(); renderWeek(); });
         }
       });
@@ -826,10 +943,10 @@
         if (!name) { $('optionName').focus(); return; }
         var emoji = ($('optionEmojiCustom').value.trim() || '🍽️').slice(0, 4);
         var color = $('optionColorPick').dataset.picked || COLORS[0];
-        var data = { name: name, emoji: emoji, color: color };
+        var data = { name: name, emoji: emoji, color: color, serves: dialogServes };
         if (editingOptionId) {
           var o = optionById(editingOptionId);
-          if (o) { o.name = data.name; o.emoji = data.emoji; o.color = data.color; }
+          if (o) { o.name = data.name; o.emoji = data.emoji; o.color = data.color; o.serves = data.serves; }
         } else {
           state.options.push(Object.assign({ id: uid() }, data));
         }

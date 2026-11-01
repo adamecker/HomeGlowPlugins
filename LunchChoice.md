@@ -37,8 +37,20 @@ choice for the house.
   dialog moves to the next person who hasn't chosen yet, if there is
   one. **Clear choice** removes the selected person's choice for that
   day. **Done** closes the dialog.
+- **Snacks (optional):** Manage has a "Kids also pick a snack"
+  checkbox, off by default. Turning it on adds a snack pick to each
+  day, alongside the lunch pick, and the choice dialog gains
+  Lunch/Snack tabs. Snack picks are per day per person, exactly like
+  lunch picks, and never affect lunch picks. Like weekends, it is a
+  household-wide setting — every display sees the same snack rows.
+  Turning it off hides snack picks but keeps them saved, so turning
+  it back on restores them.
 - **Manage:** select the household users who choose lunch, and add,
-  edit, and delete lunch options. There is no create-person form:
+  edit, and delete options. Each option has a "Used for" choice:
+  Lunch only, Snack only, or Both; Manage shows a badge per option
+  (Lunch, Snack, or Lunch + Snack). An option set to Both appears in
+  both pickers; a snack-only option never appears in the lunch
+  picker, and vice versa. There is no create-person form:
   Manage lists the household's HomeGlow users (read from the
   household user list, which the plugin's frame token is allowed to
   read) and parents check who chooses lunch. Deleting an option is
@@ -84,9 +96,13 @@ instances; the supported path is per-display filtering.
 3. If you pack weekend lunches too, turn on "Show Saturday and
    Sunday" in Manage. Otherwise leave it off — Monday–Friday is the
    default.
-4. If a display should show only some people, use "On this display"
+4. If kids also pick a snack, turn on "Kids also pick a snack" in
+   Manage and add snack options (name, emoji, color, "Used for:
+   Snack only") — or set an existing option to Both so it appears
+   in both pickers. Leave it off and nothing about snacks appears.
+5. If a display should show only some people, use "On this display"
    in Manage on that display. The wall can keep showing everyone.
-5. That's it. Kids tap a day and tap their lunch.
+6. That's it. Kids tap a day and tap their lunch.
 
 ## Pictures and pre-readers
 
@@ -113,15 +129,20 @@ Plugin storage key `data`:
 {
   "version": 1,
   "selectedUserIds": [1, 2],
-  "options": [{ "id": "...", "name": "Sandwich", "emoji": "🥪", "color": "#ffb74d" }],
+  "options": [{ "id": "...", "name": "Sandwich", "emoji": "🥪", "color": "#ffb74d", "serves": "lunch" }],
   "choices": { "2026-10-29": { "u1": "<optionId>" } },
+  "snackChoices": { "2026-10-29": { "u1": "<optionId>" } },
+  "snackChoicesEnabled": false,
   "showWeekends": false,
   "updatedAt": "2026-10-28T00:00:00.000Z"
 }
 ```
 
 Choices are keyed by `"u" + <household user id>`. Dates are local
-`YYYY-MM-DD`. The widget polls storage (default every
+`YYYY-MM-DD`. An option's `serves` is `"lunch"`, `"snack"`, or
+`"both"`; options without `serves` count as lunch. Snack picks live
+in the separate `snackChoices` map (same shape as `choices`) and are
+only written while `snackChoicesEnabled` is true. The widget polls storage (default every
 10 seconds, setting `pollSeconds`) so a choice made on one display
 appears on the others; a refresh is skipped while any dialog is open,
 and concurrent edits resolve last-write-wins.
@@ -129,6 +150,11 @@ and concurrent edits resolve last-write-wins.
 **Migration:** documents saved before the week-shape change have no
 `showWeekends` field and default to `false` (Monday–Friday), so
 existing choices and options are untouched. Documents saved before
+snack picks existed have no `snackChoicesEnabled` field and default
+to `false`, so no snack UI appears and no snack data is written
+until the toggle is turned on; options saved before `serves` existed
+carry no field and count as lunch, so existing options need no
+rewrite. Documents saved before
 the household-users change carry a legacy `people` array and choices
 keyed by custom person ids; those are preserved in the document
 untouched on save but are no longer rendered — the lunch set is now
