@@ -39,7 +39,7 @@ so turning it back on restores them.
   checkbox, off by default. Turning it on shows all seven days. It is
   a household-wide setting — every display sees the same week shape.
 - **Days to show:** Manage has a "Days to show" setting, 1–5,
-  default 5. It caps how many days ahead the week view shows,
+  default 1. It caps how many days ahead the week view shows,
   starting at the next meal to pick: 1 shows just that next day, 5
   shows up to the rest of the week. A narrow display still shows
   fewer when the day cards do not fit. Like weekends, it is a
@@ -181,7 +181,7 @@ Plugin storage key `data`:
   },
   "enabledMeals": ["lunch"],
   "showWeekends": false,
-  "daysToShow": 5,
+  "daysToShow": 1,
   "updatedAt": "2026-10-28T00:00:00.000Z"
 }
 ```

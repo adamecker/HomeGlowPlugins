@@ -41,7 +41,7 @@
     day when tomorrow is not one), and the number of days shown grows
     with the widget's actual width — a small widget shows only that
     next day, a large one shows the full week. Manage's "Days to show"
-    setting (1-5, default 5) caps how many days ahead appear, so a
+    setting (1-5, default 1) caps how many days ahead appear, so a
     household can ask for just the next day even on a wide display;
     narrow displays still show fewer when the cards don't fit. Day
     cards stretch to fill the row. Week paging (‹/›) and the Today
@@ -59,7 +59,7 @@
                    snack: { ... }, breakfast: { ... }, dinner: { ... } },
           enabledMeals: ["lunch"],
           showWeekends: false,
-          daysToShow: 5,
+          daysToShow: 1,
           updatedAt: ISO timestamp }
     An option's `meals` is the configurable set of meals it appears
     in, any subset of breakfast/snack/lunch/dinner (at least one).
@@ -191,6 +191,10 @@
     .mealsub .none { opacity: 0.6; }
     .mealsub .pickstack, .todaymeal .pickstack { display: flex; flex-direction: column; gap: 0.1rem; }
     .mealsub .pickstack .pick, .todaymeal .pickstack .pick { display: flex; align-items: center; gap: 0.4rem; }
+    /* Option pictures in pick rows replace the emoji, so they render
+       at roughly emoji size (1.4rem square, cropped, never stretched)
+       — an unconstrained photo at natural size used to blow rows up. */
+    .mealsub .pick img.em, .todaymeal .pick img.em { width: 1.4rem; height: 1.4rem; object-fit: cover; border-radius: 6px; flex: none; }
     .manage h2 { font-size: 1.05rem; margin: 1rem 0 0.5rem; }
     .mrow {
       display: flex; align-items: center; gap: 0.5rem; padding: 0.45rem 0;
@@ -613,8 +617,8 @@
       // No example names — nothing here may look like household data.
       // Lunch is the only meal on by default, preserving the
       // pre-meals behavior (snack stays opt-in, as it was).
-      // Days to show defaults to 5 (the full school week).
-      return { version: 1, selectedUserIds: [], options: [], picks: {}, enabledMeals: ['lunch'], showWeekends: false, daysToShow: 5, updatedAt: nowIso() };
+      // Days to show defaults to 1 (just the next day to pick).
+      return { version: 1, selectedUserIds: [], options: [], picks: {}, enabledMeals: ['lunch'], showWeekends: false, daysToShow: 1, updatedAt: nowIso() };
     }
     function normalize(doc) {
       if (!doc || typeof doc !== 'object') return defaultState();
@@ -669,9 +673,9 @@
         picks: picks,
         enabledMeals: enabled,
         showWeekends: doc.showWeekends === true,
-        // Days to show: 1-5, default 5 when absent or out of range,
-        // so older docs keep today's full-week behavior.
-        daysToShow: (typeof doc.daysToShow === 'number' && doc.daysToShow >= 1 && doc.daysToShow <= 5) ? Math.floor(doc.daysToShow) : 5,
+        // Days to show: 1-5. Absent or non-numeric values default to 1;
+        // present numbers are clamped into range (so an explicit 5 stays 5).
+        daysToShow: (typeof doc.daysToShow === 'number' && isFinite(doc.daysToShow)) ? Math.max(1, Math.min(5, Math.floor(doc.daysToShow))) : 1,
         updatedAt: doc.updatedAt || nowIso()
       };
     }
@@ -716,7 +720,7 @@
     // the next meal to pick and grow with the widget's actual width.
     // Fit count: one day card needs ~170px to stay usable, so the count
     // is floor(width / 170), at least 1, capped at the week's days.
-    // The Manage "Days to show" setting (1-5, default 5) caps it
+    // The Manage "Days to show" setting (1-5, default 1) caps it
     // further, so a household can ask for just the next day even on
     // a wide display; narrow displays still show fewer when the
     // cards don't fit.
@@ -726,7 +730,7 @@
     }
     function daysToShow() {
       var n = state.daysToShow;
-      return (typeof n === 'number' && n >= 1 && n <= 5) ? Math.floor(n) : 5;
+      return (typeof n === 'number' && n >= 1 && n <= 5) ? Math.floor(n) : 1;
     }
     function windowedDays() {
       var days = visibleDays();
