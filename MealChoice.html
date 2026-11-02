@@ -16,8 +16,8 @@
     Lunch is on by default, the others off. Picks for one meal never
     touch another meal's picks, and turning a meal off hides it but
     keeps its saved picks, so re-enabling restores them.
-    A display can also show only some people (a per-display filter stored
-    on the display itself, not in the shared doc) - see MealChoice.md.
+    Every display shows the same people: the household selection in
+    the shared doc. There is no per-display filter.
 
     People come from the household itself, not from a create form:
     Manage reads the HomeGlow user list (GET /api/users, a read-only
@@ -44,8 +44,8 @@
     setting (1-5, default 1) caps how many days ahead appear, so a
     household can ask for just the next day even on a wide display;
     narrow displays still show fewer when the cards don't fit. Day
-    cards stretch to fill the row. Week paging (‹/›) and the Today
-    button are unchanged. Every pick row in the week view and the
+    cards stretch to fill the row. ‹/› step the window one shown day
+    at a time; Today returns to the next meal to pick. Every pick row in the week view and the
     Today box carries its chooser (picture or generic glyph) and its
     meal label, with a divider between rows, so it is always clear
     who chose what for which meal.
@@ -82,8 +82,8 @@
     from before users came from the household list, are preserved in
     the document untouched on save but are no longer rendered.
     showWeekends is household-wide (all displays share it), as are
-    enabledMeals and daysToShow; the per-display people filter lives in this
-    display's localStorage shim only, never in the shared doc.
+    enabledMeals, daysToShow, and the people selection
+    (selectedUserIds).
     The meal toggles are household-wide too: turning a meal off hides
     its picks everywhere but keeps them saved.
     Older docs without showWeekends default to false.
@@ -210,6 +210,14 @@
     [data-theme="dark"] .mrow { border-bottom-color: rgba(255,255,255,0.12); }
     .mrow .nm { flex: 1; }
     .mrow .flabel { flex: 1; }
+    /* Days to show sits right beside its label, not at the far edge. */
+    .mrow.tight .flabel { flex: none; }
+    #daysToShowSelect {
+      border: 1px solid var(--border, #ccc); border-radius: 10px;
+      background: var(--card, rgba(255,255,255,0.6)); color: inherit;
+      padding: 0.5rem 0.7rem; min-height: 44px; font: inherit;
+    }
+    [data-theme="dark"] #daysToShowSelect { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); }
     .mrow input[type="checkbox"] { width: 22px; height: 22px; flex: none; accent-color: var(--accent, #4a90d9); }
     .mrow .thumb { width: 40px; height: 40px; object-fit: cover; border-radius: 8px; flex: none; }
     .mrow .em { font-size: 1.5rem; }
@@ -293,8 +301,8 @@
       <h1>🍽️ Meal Choice</h1>
       <span class="spacer"></span>
       <button type="button" class="todaybtn" id="todayBtn">Today</button>
-      <button type="button" class="navbtn" id="prevBtn" aria-label="Previous week">‹</button>
-      <button type="button" class="navbtn" id="nextBtn" aria-label="Next week">›</button>
+      <button type="button" class="navbtn" id="prevBtn" aria-label="Previous day">‹</button>
+      <button type="button" class="navbtn" id="nextBtn" aria-label="Next day">›</button>
       <button type="button" class="managebtn" id="manageBtn">Manage</button>
     </div>
     <div class="weeklabel" id="weekLabel"></div>
@@ -306,12 +314,11 @@
     </div>
 
     <div id="manageView" class="manage hidden">
-      <button type="button" class="navbtn" id="backBtn">‹ Back to week</button>
       <h2>Week view</h2>
       <div id="displaySettings"></div>
+      <button type="button" class="addbtn" id="foodOptionsBtn">Food options</button>
       <h2>People</h2>
       <div id="peopleList"></div>
-      <button type="button" class="addbtn" id="foodOptionsBtn">Food options</button>
     </div>
 
     <div class="sync" id="syncLine" role="status"></div>
@@ -365,7 +372,6 @@
   (function () {
     var DOC_KEY = 'data';
     var LS_KEY = 'homeglowMealChoice.data';
-    var LS_FILTER_KEY = 'homeglowMealChoice.displayPeople';
     var MAX_DOC_BYTES = 60000; // under the 64 KB server per-key cap
     var COLORS = ['#e57373', '#f06292', '#ba68c8', '#7986cb', '#64b5f6', '#4db6ac', '#81c784', '#dce775', '#ffb74d', '#ff8a65'];
     var FOOD_EMOJI = ['🥪', '🍕', '🍝', '🌮', '🥗', '🍎', '🍌', '🧀', '🥚', '🍗', '🥦', '🍓', '🥞', '🧇', '🥨', '🍩', '🍪', '🥛', '🧃', '🍫'];
@@ -432,6 +438,7 @@
     var containerWidth = 0; // .wrap width in px, via ResizeObserver (0 = unmeasured: show the full week)
     var settings = { pollSeconds: 10 };
     var weekMonday = null; // Monday of the shown calendar week (set after state loads)
+    var windowStart = null; // first shown day of a paged window; null = auto (next meal to pick)
     var view = 'week'; // 'week' | 'manage'
     var dialogDateKey = null;
     var dialogPersonId = null;
@@ -484,15 +491,12 @@
       var dow = new Date().getDay();
       return state.showWeekends || (dow !== 0 && dow !== 6);
     }
-    function loadFilter() {
-      try {
-        var raw = localStorage.getItem(LS_FILTER_KEY);
-        var arr = raw ? JSON.parse(raw) : [];
-        return Array.isArray(arr) ? arr.filter(function (id) { return typeof id === 'string'; }) : [];
-      } catch (e) { return []; }
-    }
-    function saveFilter(ids) {
-      try { localStorage.setItem(LS_FILTER_KEY, JSON.stringify(ids)); } catch (e) {}
+    function visiblePeople() {
+      // One household selection, used on every display: the
+      // per-display filter was removed, so the selected users are
+      // always the visible ones. (A stale localStorage filter key is
+      // cleared on boot and never read.)
+      return selectedPeople();
     }
     // ---- household users (Part 1): read-only core route, allowed for
     // plugins with their frame token (server/utils/pluginRequestPolicy.js
@@ -533,13 +537,6 @@
         else out.push({ id: 'u' + id, userId: id, name: 'User ' + id, avatar: null });
       });
       return out;
-    }
-    function visiblePeople() {
-      var sel = selectedPeople();
-      var f = loadFilter();
-      if (!f.length) return sel;
-      var shown = sel.filter(function (p) { return f.indexOf(p.id) !== -1; });
-      return shown.length ? shown : sel;
     }
     function personById(id) { return selectedPeople().filter(function (p) { return p.id === id; })[0] || null; }
     function optionById(id) { return (state.options || []).filter(function (o) { return o.id === id; })[0] || null; }
@@ -739,7 +736,33 @@
       var n = state.daysToShow;
       return (typeof n === 'number' && n >= 1 && n <= 5) ? Math.floor(n) : 1;
     }
-    function windowedDays() {
+    // ---- day-stepped window: the ‹/› arrows move the window one
+    // shown day at a time (a school day when weekends are hidden, any
+    // calendar day when they are shown), so Fri steps to Mon with
+    // weekends hidden and to Sat with weekends shown. The window is N
+    // consecutive shown days from its start. windowStart is null until
+    // the user pages; then it pins the window start. Today clears it
+    // back to auto (the next meal to pick).
+    function isShownDay(d) {
+      var dow = d.getDay();
+      return state.showWeekends || (dow !== 0 && dow !== 6);
+    }
+    function shownDaysFrom(start, count) {
+      var out = [];
+      var d = startOfDay(start);
+      while (out.length < count) {
+        if (isShownDay(d)) out.push(new Date(d.getTime()));
+        d = addDays(d, 1);
+      }
+      return out;
+    }
+    function nextShownDay(d) { return shownDaysFrom(addDays(d, 1), 1)[0]; }
+    function prevShownDay(d) {
+      var x = addDays(d, -1);
+      while (!isShownDay(x)) x = addDays(x, -1);
+      return x;
+    }
+    function autoWindowedDays() {
       var days = visibleDays();
       var tk = todayKey();
       var ai = -1;
@@ -759,10 +782,23 @@
       }
       return days.slice(ai, ai + Math.max(1, Math.min(daysToShow(), days.length - ai, fitCount(days.length - ai))));
     }
+    function windowedDays() {
+      if (windowStart) {
+        var total = daysToShow();
+        return shownDaysFrom(windowStart, total).slice(0, Math.max(1, Math.min(total, fitCount(total))));
+      }
+      return autoWindowedDays();
+    }
     function renderWeekLabel(days) {
       days = days || visibleDays();
       var first = days[0];
       var last = days[days.length - 1];
+      if (days.length === 1 || dateKey(first) === dateKey(last)) {
+        // A one-day window shows the single date, never a range that
+        // repeats it ("Nov 2 – Nov 2, 2026" was the old shape).
+        $('weekLabel').textContent = first.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        return;
+      }
       $('weekLabel').textContent = first.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) +
         ' – ' + last.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
     }
@@ -896,10 +932,9 @@
         }).join('');
       }
       var ds = $('displaySettings');
-      var filter = loadFilter();
       var dhtml = '<div class="mrow"><input type="checkbox" id="weekendToggle"' + (state.showWeekends ? ' checked' : '') + '><span class="flabel">Show Saturday and Sunday</span></div>' +
         '<p class="hint">School days are Monday–Friday by default. This weekend setting is shared with every display.</p>' +
-        '<div class="mrow"><span class="flabel">Days to show</span><select id="daysToShowSelect">' +
+        '<div class="mrow tight"><span class="flabel">Days to show</span><select id="daysToShowSelect">' +
         [1, 2, 3, 4, 5].map(function (n) { return '<option value="' + n + '"' + (daysToShow() === n ? ' selected' : '') + '>' + n + '</option>'; }).join('') +
         '</select></div>' +
         '<p class="hint">How many days ahead the week view shows, starting at the next meal to pick. 5 is the full school week; narrow displays still show fewer when the day cards do not fit. This setting is shared with every display.</p>' +
@@ -907,18 +942,7 @@
         '<p class="hint">Each meal gets its own pick per day. Turning a meal off hides it everywhere but keeps its saved picks — turning it back on restores them. This setting is shared with every display. At least one meal stays on.</p>' +
         MEALS.map(function (m) {
           return '<div class="mrow"><input type="checkbox" data-meal-toggle="' + m.id + '"' + (isMealEnabled(m.id) ? ' checked' : '') + '><span class="flabel">' + m.emoji + ' ' + m.label + '</span></div>';
-        }).join('') +
-        '<h2>On this display</h2>' +
-        '<p class="hint">Uncheck someone to hide them on this display only. Other displays are not affected. Checking everyone again shows everyone here (and you cannot hide everybody — clearing all resets to everyone).</p>';
-      if (!sel.length) {
-        dhtml += '<p class="hint">Select users above first.</p>';
-      } else {
-        sel.forEach(function (p) {
-          var checked = !filter.length || filter.indexOf(p.id) !== -1;
-          dhtml += '<div class="mrow"><input type="checkbox" data-filter-person="' + esc(p.id) + '"' + (checked ? ' checked' : '') + '>' + avatarHtml(p, 'avatar') + '<span class="flabel">' + esc(p.name) + '</span></div>';
-        });
-      }
-      dhtml += '<button type="button" class="addbtn" id="filterResetBtn">Show everyone on this display</button>';
+        }).join('');
       ds.innerHTML = dhtml;
       $('weekendToggle').addEventListener('change', function () {
         state.showWeekends = $('weekendToggle').checked;
@@ -941,15 +965,6 @@
           save().then(function () { renderAll(); });
         });
       });
-      ds.querySelectorAll('[data-filter-person]').forEach(function (cb) {
-        cb.addEventListener('change', function () {
-          var checkedIds = [];
-          ds.querySelectorAll('[data-filter-person]:checked').forEach(function (c) { checkedIds.push(c.getAttribute('data-filter-person')); });
-          if (checkedIds.length === sel.length) saveFilter([]); else saveFilter(checkedIds);
-          renderWeek(); renderManage();
-        });
-      });
-      $('filterResetBtn').addEventListener('click', function () { saveFilter([]); renderWeek(); renderManage(); });
       // The food list lives in its own window now; the Manage button
       // shows the count so the list size is visible without opening it.
       $('foodOptionsBtn').textContent = 'Food options (' + state.options.length + ')';
@@ -995,7 +1010,14 @@
       view = v;
       $('weekView').classList.toggle('hidden', v !== 'week');
       $('manageView').classList.toggle('hidden', v !== 'manage');
-      $('manageBtn').textContent = v === 'manage' ? 'Week' : 'Manage';
+      // In Manage the header top-right collapses to a single Back
+      // button (the Manage button itself); Today and the day-step
+      // arrows return with the week view. There is no second
+      // back button inside Manage.
+      $('todayBtn').classList.toggle('hidden', v === 'manage');
+      $('prevBtn').classList.toggle('hidden', v === 'manage');
+      $('nextBtn').classList.toggle('hidden', v === 'manage');
+      $('manageBtn').textContent = v === 'manage' ? 'Back' : 'Manage';
       if (v === 'manage') { loadUsers().then(function () { renderManage(); }); renderManage(); } else renderWeek();
     }
     function renderAll() { if (view === 'manage') renderManage(); else renderWeek(); }
@@ -1162,11 +1184,18 @@
 
     // ---- wiring ----
     function bindStatic() {
-      $('prevBtn').addEventListener('click', function () { weekMonday = addDays(weekMonday, -7); renderWeek(); });
-      $('nextBtn').addEventListener('click', function () { weekMonday = addDays(weekMonday, 7); renderWeek(); });
-      $('todayBtn').addEventListener('click', function () { weekMonday = defaultWeekMonday(); renderWeek(); });
+      $('prevBtn').addEventListener('click', function () {
+        var start = windowStart || windowedDays()[0];
+        windowStart = prevShownDay(start);
+        renderWeek();
+      });
+      $('nextBtn').addEventListener('click', function () {
+        var start = windowStart || windowedDays()[0];
+        windowStart = nextShownDay(start);
+        renderWeek();
+      });
+      $('todayBtn').addEventListener('click', function () { windowStart = null; weekMonday = defaultWeekMonday(); renderWeek(); });
       $('manageBtn').addEventListener('click', function () { setView(view === 'manage' ? 'week' : 'manage'); });
-      $('backBtn').addEventListener('click', function () { setView('week'); });
       $('addOptionBtn').addEventListener('click', function () { openOptionDialog(null); });
       $('foodOptionsBtn').addEventListener('click', function () { renderManage(); openDialog($('foodDialog')); });
       $('foodDoneBtn').addEventListener('click', function () { closeDialog($('foodDialog')); });
@@ -1240,6 +1269,10 @@
         var theme = params.get('theme');
         if (theme === 'dark' || theme === 'light') document.documentElement.setAttribute('data-theme', theme);
       } catch (e) {}
+      // A display that once filtered people keeps the stale key; it
+      // no longer affects rendering, but clear it so nothing stale
+      // lingers for a future reader.
+      try { localStorage.removeItem('homeglowMealChoice.displayPeople'); } catch (e) {}
       bindStatic();
       // Responsive week: re-render when the widget's width changes the
       // day count. Only the count matters, so re-render only when it moves.

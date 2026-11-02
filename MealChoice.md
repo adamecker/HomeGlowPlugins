@@ -29,8 +29,14 @@ so turning it back on restores them.
   this week's meals are done (for example Friday with weekends
   hidden), the view moves to next week, since that holds the next
   meal to pick.
-- **Week navigation:** ‹ and › move a week at a time; **Today** jumps
-  back to the current week.
+- **Week navigation:** ‹ and › step the window one shown day at a
+  time — from Monday, › shows Tuesday, not next Monday. When
+  weekends are hidden the steps skip Saturday and Sunday, so Friday
+  steps to Monday; when weekends are shown they step calendar days.
+  **Today** jumps back to the next meal to pick. When the window
+  holds a single day, the header shows that date alone ("Nov 2,
+  2026"), not a range repeating it; multi-day windows show the
+  range from the first shown day to the last.
 - **Today box:** the top of the week view shows today's choices at a
   glance, so packing in the morning is one look. On Saturday or Sunday
   with weekends hidden there is no school meal to pack, so the Today
@@ -45,7 +51,7 @@ so turning it back on restores them.
   fewer when the day cards do not fit. Like weekends, it is a
   household-wide setting — every display sees the same window. A
   document saved before this setting existed has no field and
-  behaves as 5, so nothing already shown changes.
+  behaves as 1, the current default.
 - **Weekend edge case:** when today is Saturday or Sunday and weekends
   are hidden, there is nothing pickable this week, so the week view
   (and the Today button) default to *next* week's Monday–Friday
@@ -67,12 +73,14 @@ so turning it back on restores them.
   setting — every display sees the same meal rows. Turning a meal off
   hides its picks but keeps them saved, so turning it back on
   restores them. At least one meal stays on.
-- **Manage:** the settings page holds the shared settings at the
-  top — Days to show, Show weekends, the Meals list, and the
-  household users who choose meals — plus the per-display "On this
-  display" filter. The food options themselves live behind a
+- **Manage:** the settings page holds, in order: the Week view
+  settings (Show weekends, Days to show), the Meals list, the
   **Food options** button (which shows the option count) that opens
-  a larger window: add, edit, and delete options there. Each option
+  a larger window, then the household users who choose meals. The
+  food options themselves live behind that button: add, edit, and
+  delete options there. In Manage, the header's top-right buttons
+  switch to a single **Back** button that returns to the week view;
+  there is no second back button inside Manage. Each option
   has a Meals tag set: check
   any combination of Breakfast, Snack, Lunch, Dinner; Manage shows a
   badge per option (for example Lunch, Snack, or Lunch + Snack). When
@@ -91,33 +99,21 @@ so turning it back on restores them.
   meal it was chosen on. Unselecting a user hides them from the week
   view; their past choices stay in the document but are not shown.
 
-## One widget, or one kid per display
+## One household selection, on every display
 
-There are two supported ways to use the widget:
+There is exactly one selection of people: the household users
+checked in Manage, stored in the shared document as
+`selectedUserIds`. Every display shows those people — the week view,
+the Today box, and the choice dialog all use the same selection, so
+the wall and a phone always agree on who is choosing.
 
-- **Mode A — one widget, everyone:** the default. Every person appears
-  on every day card, and the choice dialog shows all person chips —
-  tap a chip to switch people.
-- **Mode B — one display, some people:** Manage has an "On this
-  display" section. Uncheck someone there and they disappear from
-  *that display's* week view, Today box, and choice dialog — other
-  displays are not affected. Checking everyone again (or "Show
-  everyone on this display") restores everyone. This is how a display
-  shows only one kid while the wall still shows all of them.
-
-Mode B is stored on the display itself (the plugin's localStorage
-shim), never in the shared household document — that is what makes it
-per-display. A filter that ends up matching nobody falls back to
-everyone, so a display can never go blank by filtering.
-
-**Honest platform limit:** the same plugin cannot appear twice on one
-tab with different filters. Dashboard assignments are per-plugin per
-device (a widget name maps to a list of tab numbers), and the
-localStorage shim is keyed by plugin filename per display — so two
-copies on one tab would mirror each other, including the filter.
-Per-kid views work across *different displays* (wall vs. tablet, for
-example), not as two instances on one tab. Do not promise per-tab
-instances; the supported path is per-display filtering.
+The per-display "On this display" filter is gone: Manage no longer
+offers a per-display people section, and a display that once had a
+filter set now simply shows the household selection (its stale
+filter key is cleared on load and never read). If a display should
+show different people, that is a household change — uncheck the user
+in Manage and they disappear everywhere; their past choices stay in
+the document but are not shown.
 
 ## Setup (parents)
 
@@ -139,9 +135,7 @@ instances; the supported path is per-display filtering.
    tagged with those meals — or tag an existing option with another
    meal so it appears in that picker too. Leave a meal off and
    nothing about it appears.
-5. If a display should show only some people, use "On this display"
-   in Manage on that display. The wall can keep showing everyone.
-6. That's it. Kids tap a day and tap their meals.
+5. That's it. Kids tap a day and tap their meals.
 
 ## Pictures and pre-readers
 
@@ -217,16 +211,14 @@ plugin was renamed from `LunchChoice.html` (storage key
 `lunch-choice`) to `MealChoice.html` (storage key `meal-choice`):
 the document is copied across under the new key with every field
 intact, so existing documents, options, and picks carry straight
-over. The per-display filter key was renamed with it, so a display
-that had filtered people shows everyone until it is re-filtered.
-Documents saved before the household-users change carry a legacy
+over. Documents saved before the household-users change carry a legacy
 `people` array and choices keyed by custom person ids; those are
 preserved in the document untouched on save but are no longer
 rendered — the meal set is now `selectedUserIds`, and picks render
-only for selected household users. The per-display people filter is
-not in this document at all — it lives in the display's localStorage
-shim under `homeglowMealChoice.displayPeople` (an array of
-`"u" + <user id>` strings; missing or empty means everyone selected).
+only for selected household users. The old per-display people filter
+is gone: a stale `homeglowMealChoice.displayPeople` key in a
+display's localStorage is cleared on load and never read, so a
+display that once filtered people now shows the household selection.
 
 ## What it doesn't do
 
