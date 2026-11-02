@@ -14,13 +14,14 @@ so turning it back on restores them.
 ## Use it
 
 - **Week view:** the current calendar week, Monday–Friday by default.
-  Each day card shows every selected person's picks per enabled meal
-  (or a dash if they haven't chosen). Every pick row is labeled with
-  its chooser (profile picture, or 👤 when none is set) and its meal
-  (Lunch, Snack, Breakfast, Dinner), with a divider between rows, so
-  it is always clear who chose what for which meal. Tap a day to
-  choose. Past days are shown greyed out and can't be changed. Today
-  is highlighted when it is visible. The week view fits its
+  Each day card groups picks by person: one header per person
+  (profile picture, or 👤 when none is set, plus their name), with
+  that person's meal subgroups beneath it, each labeled with its
+  meal (Lunch, Snack, Breakfast, Dinner), and a divider between
+  people — so it is always clear who chose what for which meal
+  without repeating anyone's name. A dash marks a meal nobody has
+  chosen yet. Tap a day to choose. Past days are shown greyed out
+  and can't be changed. Today is highlighted when it is visible. The week view fits its
   container: it starts at the next meal to pick (tomorrow, or the
   next school day when tomorrow is not one) and shows as many days as
   fit — a small widget shows only that next day, a large one shows
@@ -59,15 +60,20 @@ so turning it back on restores them.
   per enabled meal; with a single meal enabled there are no tabs.
 - **Meals (optional):** Manage has a Meals list — Breakfast, Snack,
   Lunch, Dinner — each with its own checkbox. Lunch is on by default;
-  the others are off. Turning a meal on adds a pick row for it to each
-  day, alongside the other enabled meals, and a tab for it in the
+  the others are off. Turning a meal on adds a meal subgroup for it
+  under each person on each day, alongside the other enabled meals, and a tab for it in the
   choice dialog. Picks are per day per person per meal, and never
   affect other meals' picks. Like weekends, it is a household-wide
   setting — every display sees the same meal rows. Turning a meal off
   hides its picks but keeps them saved, so turning it back on
   restores them. At least one meal stays on.
-- **Manage:** select the household users who choose meals, and add,
-  edit, and delete options. Each option has a Meals tag set: check
+- **Manage:** the settings page holds the shared settings at the
+  top — Days to show, Show weekends, the Meals list, and the
+  household users who choose meals — plus the per-display "On this
+  display" filter. The food options themselves live behind a
+  **Food options** button (which shows the option count) that opens
+  a larger window: add, edit, and delete options there. Each option
+  has a Meals tag set: check
   any combination of Breakfast, Snack, Lunch, Dinner; Manage shows a
   badge per option (for example Lunch, Snack, or Lunch + Snack). When
   adding an option, typing a name that closely matches a known food
@@ -119,7 +125,8 @@ instances; the supported path is per-display filtering.
    The list comes from the household's HomeGlow users — add or
    rename users in Admin, not here. Nothing is pre-selected: the
    first run has nobody selected on purpose.
-2. Add meal options: a name, a symbol emoji, and a color, plus the
+2. Add meal options: open **Food options** from Manage — a name, a
+   symbol emoji, a color, optionally a picture URL (see below), plus the
    meals each option applies to (check Breakfast, Snack, Lunch,
    Dinner as needed — an option tagged with several meals appears in
    each of those pickers). The emoji auto-fills for known foods as
@@ -144,6 +151,11 @@ there for readers. Color helps too — give each option a distinct color
 and the choice is recognizable at a glance. Emoji + text is the v1
 answer, and it is enough.
 
+An option can also show a remote picture: put an `http(s)` picture URL
+in the option form and it renders instead of the emoji (with the emoji
+as fallback if the picture fails to load). Only `http(s)` links are
+accepted.
+
 Uploading a picture file from inside the widget is **not** supported
 in v1, and that is a platform limit, not an oversight: a plugin
 frame's token only covers its own plugin storage, settings, Home
@@ -151,7 +163,8 @@ Assistant, and notify routes (no plugin-scoped upload route or SDK
 upload method), and plugin storage caps each key at 64 KB, so full
 photos stored as data URLs would not fit a whole household document
 anyway. Real uploads would need a core change; no proposal is drafted
-here — emoji + text is the supported path for now.
+here — emoji + text (plus an optional remote URL) is the supported
+path for now.
 
 ## Data model
 
@@ -161,7 +174,7 @@ Plugin storage key `data`:
 {
   "version": 1,
   "selectedUserIds": [1, 2],
-  "options": [{ "id": "...", "name": "Sandwich", "emoji": "🥪", "color": "#ffb74d", "meals": ["lunch"] }],
+  "options": [{ "id": "...", "name": "Sandwich", "emoji": "🥪", "color": "#ffb74d", "meals": ["lunch"], "imageUrl": null }],
   "picks": {
     "lunch": { "2026-10-29": { "u1": ["<optionId>", "<optionId>"] } },
     "snack": { "2026-10-29": { "u1": ["<optionId>"] } }
