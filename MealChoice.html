@@ -38,8 +38,15 @@
     starting at the next meal to pick (tomorrow, or the next school
     day when tomorrow is not one), and the number of days shown grows
     with the widget's actual width — a small widget shows only that
-    next day, a large one shows the full week. Day cards stretch to
-    fill the row. Week paging (‹/›) and the Today button are unchanged.
+    next day, a large one shows the full week. Manage's "Days to show"
+    setting (1-5, default 5) caps how many days ahead appear, so a
+    household can ask for just the next day even on a wide display;
+    narrow displays still show fewer when the cards don't fit. Day
+    cards stretch to fill the row. Week paging (‹/›) and the Today
+    button are unchanged. Every pick row in the week view and the
+    Today box carries its chooser (picture or generic glyph) and its
+    meal label, with a divider between rows, so it is always clear
+    who chose what for which meal.
 
     Storage (the contract other writers must follow):
       HomeGlow.storage key "data", value:
@@ -50,6 +57,7 @@
                    snack: { ... }, breakfast: { ... }, dinner: { ... } },
           enabledMeals: ["lunch"],
           showWeekends: false,
+          daysToShow: 5,
           updatedAt: ISO timestamp }
     An option's `meals` is the configurable set of meals it appears
     in, any subset of breakfast/snack/lunch/dinner (at least one).
@@ -71,8 +79,8 @@
     The legacy `people` array and choices keyed by custom person ids,
     from before users came from the household list, are preserved in
     the document untouched on save but are no longer rendered.
-    showWeekends is household-wide (all displays share it), as is
-    enabledMeals; the per-display people filter lives in this
+    showWeekends is household-wide (all displays share it), as are
+    enabledMeals and daysToShow; the per-display people filter lives in this
     display's localStorage shim only, never in the shared doc.
     The meal toggles are household-wide too: turning a meal off hides
     its picks everywhere but keeps them saved.
@@ -243,6 +251,11 @@
     }
     .mealbtn[aria-pressed="true"] { outline: 3px solid var(--accent, #4a90d9); outline-offset: 1px; }
     .daychoice .meallabel { font-size: 0.8rem; opacity: 0.75; }
+    /* Separator between pick rows in a day card / Today box, so one
+       person's lunch picks never visually run into their snack picks
+       (or into the next person's rows). First row has no divider. */
+    .daychoice + .daychoice, .todayrow + .todayrow { border-top: 1px solid rgba(0,0,0,0.12); margin-top: 0.25rem; padding-top: 0.25rem; }
+    [data-theme="dark"] .daychoice + .daychoice, [data-theme="dark"] .todayrow + .todayrow { border-top-color: rgba(255,255,255,0.15); }
     .dlgfoot { display: flex; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap; }
     .dlgfoot .spacer { flex: 1; }
     .hint { font-size: 0.85rem; opacity: 0.75; }
@@ -578,7 +591,8 @@
       // No example names — nothing here may look like household data.
       // Lunch is the only meal on by default, preserving the
       // pre-meals behavior (snack stays opt-in, as it was).
-      return { version: 1, selectedUserIds: [], options: [], picks: {}, enabledMeals: ['lunch'], showWeekends: false, updatedAt: nowIso() };
+      // Days to show defaults to 5 (the full school week).
+      return { version: 1, selectedUserIds: [], options: [], picks: {}, enabledMeals: ['lunch'], showWeekends: false, daysToShow: 5, updatedAt: nowIso() };
     }
     function normalize(doc) {
       if (!doc || typeof doc !== 'object') return defaultState();
@@ -633,6 +647,9 @@
         picks: picks,
         enabledMeals: enabled,
         showWeekends: doc.showWeekends === true,
+        // Days to show: 1-5, default 5 when absent or out of range,
+        // so older docs keep today's full-week behavior.
+        daysToShow: (typeof doc.daysToShow === 'number' && doc.daysToShow >= 1 && doc.daysToShow <= 5) ? Math.floor(doc.daysToShow) : 5,
         updatedAt: doc.updatedAt || nowIso()
       };
     }
@@ -667,9 +684,17 @@
     // the next meal to pick and grow with the widget's actual width.
     // Fit count: one day card needs ~170px to stay usable, so the count
     // is floor(width / 170), at least 1, capped at the week's days.
+    // The Manage "Days to show" setting (1-5, default 5) caps it
+    // further, so a household can ask for just the next day even on
+    // a wide display; narrow displays still show fewer when the
+    // cards don't fit.
     function fitCount(total) {
       if (!containerWidth) return total;
       return Math.max(1, Math.min(total, Math.floor(containerWidth / 170)));
+    }
+    function daysToShow() {
+      var n = state.daysToShow;
+      return (typeof n === 'number' && n >= 1 && n <= 5) ? Math.floor(n) : 5;
     }
     function windowedDays() {
       var days = visibleDays();
@@ -689,7 +714,7 @@
           ai = 0; // a paged-to past/future week: start at its first day
         }
       }
-      return days.slice(ai, ai + fitCount(days.length - ai));
+      return days.slice(ai, ai + Math.max(1, Math.min(daysToShow(), days.length - ai, fitCount(days.length - ai))));
     }
     function renderWeekLabel(days) {
       days = days || visibleDays();
@@ -704,13 +729,15 @@
       if (!visiblePeople().length || !todayIsChoosable()) { box.classList.add('hidden'); return; }
       box.classList.remove('hidden');
       var html = '<h2>Today — ' + esc(fmtDay(new Date())) + '</h2>';
-      var lunchOn = isMealEnabled('lunch');
       visiblePeople().forEach(function (p) {
         enabledMealDefs().forEach(function (m) {
           var picked = choicesForMeal(tk, p.id, m.id).map(function (id) { return optionById(id); }).filter(function (o) { return !!o; });
           var row = '<div class="todayrow">';
-          if (m.id === 'lunch' || !lunchOn) row += personLabel(p);
-          if (m.id !== 'lunch') row += '<span class="choice">' + m.emoji + ' ' + esc(m.label) + '</span>';
+          // Every row carries its chooser AND its meal label, so a
+          // snack row can never be mistaken for its owner's lunch row
+          // (or for another kid's row); the CSS divider separates rows.
+          row += personLabel(p);
+          row += '<span class="choice">' + m.emoji + ' ' + esc(m.label) + '</span>';
           row += '<span class="choice">' +
             (picked.length ? '<span class="pickstack">' + picked.map(function (o) { return '<span class="pick">' + optionVisual(o) + ' ' + esc(o.name) + '</span>'; }).join('') + '</span>' :
               '<span class="none">' + (m.id === 'lunch' ? 'Not chosen yet' : 'No ' + m.label.toLowerCase() + ' yet') + '</span>') + '</span>';
@@ -754,13 +781,15 @@
           '<div class="dow">' + esc(d.toLocaleDateString('en-US', { weekday: 'short' })) +
           (isToday ? ' <span class="todaypill">• Today</span>' : '') + '</div>' +
           '<div class="dnum">' + d.getDate() + '</div>';
-        var lunchOn = isMealEnabled('lunch');
         visiblePeople().forEach(function (p) {
           enabledMealDefs().forEach(function (m) {
             var picked = choicesForMeal(key, p.id, m.id).map(function (id) { return optionById(id); }).filter(function (o) { return !!o; });
             html += '<div class="daychoice">';
-            if (m.id === 'lunch' || !lunchOn) html += personLabel(p);
-            if (m.id !== 'lunch') html += '<span class="meallabel">' + m.emoji + ' ' + esc(m.label) + '</span>';
+            // Every row carries its chooser AND its meal label, so a
+            // snack row can never be mistaken for its owner's lunch row
+            // (or for another kid's row); the CSS divider separates rows.
+            html += personLabel(p);
+            html += '<span class="meallabel">' + m.emoji + ' ' + esc(m.label) + '</span>';
             html += (picked.length ? '<span class="pickstack">' + picked.map(function (o) { return '<span class="pick">' + optionVisual(o) + ' ' + esc(o.name) + '</span>'; }).join('') + '</span>' :
               '<span class="none">—</span>') + '</div>';
           });
@@ -822,6 +851,10 @@
       var filter = loadFilter();
       var dhtml = '<div class="mrow"><input type="checkbox" id="weekendToggle"' + (state.showWeekends ? ' checked' : '') + '><span class="flabel">Show Saturday and Sunday</span></div>' +
         '<p class="hint">School days are Monday–Friday by default. This weekend setting is shared with every display.</p>' +
+        '<div class="mrow"><span class="flabel">Days to show</span><select id="daysToShowSelect">' +
+        [1, 2, 3, 4, 5].map(function (n) { return '<option value="' + n + '"' + (daysToShow() === n ? ' selected' : '') + '>' + n + '</option>'; }).join('') +
+        '</select></div>' +
+        '<p class="hint">How many days ahead the week view shows, starting at the next meal to pick. 5 is the full school week; narrow displays still show fewer when the day cards do not fit. This setting is shared with every display.</p>' +
         '<h2>Meals</h2>' +
         '<p class="hint">Each meal gets its own pick per day. Turning a meal off hides it everywhere but keeps its saved picks — turning it back on restores them. This setting is shared with every display. At least one meal stays on.</p>' +
         MEALS.map(function (m) {
@@ -841,6 +874,12 @@
       ds.innerHTML = dhtml;
       $('weekendToggle').addEventListener('change', function () {
         state.showWeekends = $('weekendToggle').checked;
+        save().then(function () { renderAll(); });
+      });
+      $('daysToShowSelect').addEventListener('change', function () {
+        var n = parseInt($('daysToShowSelect').value, 10);
+        if (!(n >= 1 && n <= 5)) return;
+        state.daysToShow = n;
         save().then(function () { renderAll(); });
       });
       ds.querySelectorAll('[data-meal-toggle]').forEach(function (cb) {

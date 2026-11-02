@@ -15,12 +15,16 @@ so turning it back on restores them.
 
 - **Week view:** the current calendar week, Monday–Friday by default.
   Each day card shows every selected person's picks per enabled meal
-  (or a dash if they haven't chosen). Tap a day to choose. Past days
-  are shown greyed out and can't be changed. Today is highlighted
-  when it is visible. The week view fits its container: it starts at
-  the next meal to pick (tomorrow, or the next school day when
-  tomorrow is not one) and shows as many days as fit — a small widget
-  shows only that next day, a large one shows the full week. When
+  (or a dash if they haven't chosen). Every pick row is labeled with
+  its chooser (profile picture, or 👤 when none is set) and its meal
+  (Lunch, Snack, Breakfast, Dinner), with a divider between rows, so
+  it is always clear who chose what for which meal. Tap a day to
+  choose. Past days are shown greyed out and can't be changed. Today
+  is highlighted when it is visible. The week view fits its
+  container: it starts at the next meal to pick (tomorrow, or the
+  next school day when tomorrow is not one) and shows as many days as
+  fit — a small widget shows only that next day, a large one shows
+  the full week — up to the "Days to show" setting below. When
   this week's meals are done (for example Friday with weekends
   hidden), the view moves to next week, since that holds the next
   meal to pick.
@@ -33,6 +37,14 @@ so turning it back on restores them.
 - **Weekends (optional):** Manage has a "Show Saturday and Sunday"
   checkbox, off by default. Turning it on shows all seven days. It is
   a household-wide setting — every display sees the same week shape.
+- **Days to show:** Manage has a "Days to show" setting, 1–5,
+  default 5. It caps how many days ahead the week view shows,
+  starting at the next meal to pick: 1 shows just that next day, 5
+  shows up to the rest of the week. A narrow display still shows
+  fewer when the day cards do not fit. Like weekends, it is a
+  household-wide setting — every display sees the same window. A
+  document saved before this setting existed has no field and
+  behaves as 5, so nothing already shown changes.
 - **Weekend edge case:** when today is Saturday or Sunday and weekends
   are hidden, there is nothing pickable this week, so the week view
   (and the Today button) default to *next* week's Monday–Friday
@@ -156,6 +168,7 @@ Plugin storage key `data`:
   },
   "enabledMeals": ["lunch"],
   "showWeekends": false,
+  "daysToShow": 5,
   "updatedAt": "2026-10-28T00:00:00.000Z"
 }
 ```
