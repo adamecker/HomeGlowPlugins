@@ -17,8 +17,8 @@ so turning it back on restores them.
   Each day card groups picks by person: one header per person
   (profile picture, or 👤 when none is set, plus their name), with
   that person's meal subgroups beneath it, each labeled with its
-  meal (Lunch, Snack, Breakfast, Dinner), and a divider between
-  people — so it is always clear who chose what for which meal
+  meal (Lunch, Snack, Breakfast, Dinner), with a divider between
+  people and a divider between meal subgroups within a person — so it is always clear who chose what for which meal
   without repeating anyone's name. A dash marks a meal nobody has
   chosen yet. Tap a day to choose. Past days are shown greyed out
   and can't be changed. Today is highlighted when it is visible. The week view fits its

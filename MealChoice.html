@@ -185,6 +185,13 @@
     .daycard .todaypill { font-size: 0.75rem; font-weight: 700; }
     .persongroup + .persongroup { border-top: 1px solid rgba(0,0,0,0.12); margin-top: 0.25rem; padding-top: 0.25rem; }
     [data-theme="dark"] .persongroup + .persongroup { border-top-color: rgba(255,255,255,0.15); }
+    /* Divider between meal subgroups within a person (e.g. Snack above
+       Lunch), same visible 1px line as between people — a snack pick
+       must never visually run into the lunch picks below it. */
+    .mealsub + .mealsub { border-top: 1px solid rgba(0,0,0,0.12); margin-top: 0.25rem; padding-top: 0.25rem; }
+    [data-theme="dark"] .mealsub + .mealsub { border-top-color: rgba(255,255,255,0.15); }
+    .todaymeal + .todaymeal { border-top: 1px solid rgba(0,0,0,0.12); margin-top: 0.25rem; padding-top: 0.25rem; }
+    [data-theme="dark"] .todaymeal + .todaymeal { border-top-color: rgba(255,255,255,0.15); }
     .persongroup .personhead { display: flex; align-items: center; gap: 0.4rem; font-weight: 700; padding: 0.2rem 0 0.1rem; }
     .mealsub { display: flex; align-items: center; gap: 0.4rem; padding: 0.2rem 0; font-size: 0.9rem; }
     .mealsub .em { font-size: 1.3rem; }
@@ -269,9 +276,9 @@
     .mealbtn[aria-pressed="true"] { outline: 3px solid var(--accent, #4a90d9); outline-offset: 1px; }
     .mealsub .meallabel { font-size: 0.8rem; opacity: 0.75; }
     /* Divider between person groups in a day card / Today box, so one
-       person's picks never visually run into the next person's. Meal
-       subgroups within a person have no divider — their meal labels
-       keep them unambiguous — and the person's name appears once. */
+       person's picks never visually run into the next person's, and
+       between meal subgroups within a person, so snack picks never
+       visually run into lunch picks — the person's name appears once. */
     .dlgfoot { display: flex; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap; }
     .dlgfoot .spacer { flex: 1; }
     .hint { font-size: 0.85rem; opacity: 0.75; }
@@ -768,7 +775,7 @@
       // Rows are grouped by person: one header (avatar + name) per
       // person, with that person's meal subgroups nested under it.
       // Each subgroup keeps its meal label, so snack picks can never
-      // be mistaken for lunch picks; the divider separates people.
+      // be mistaken for lunch picks; dividers separate people and meals.
       visiblePeople().forEach(function (p) {
         var block = '<div class="todayperson"><div class="personhead">' + personLabel(p) + '</div>';
         enabledMealDefs().forEach(function (m) {
@@ -821,7 +828,7 @@
           '<div class="dnum">' + d.getDate() + '</div>';
         // Grouped by person: one header (avatar + name) per person,
         // with that person's meal subgroups nested under it. Each
-        // subgroup keeps its meal label; the divider separates people.
+        // subgroup keeps its meal label; dividers separate people and meals.
         visiblePeople().forEach(function (p) {
           html += '<div class="persongroup"><div class="personhead">' + personLabel(p) + '</div>';
           enabledMealDefs().forEach(function (m) {
