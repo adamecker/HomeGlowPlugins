@@ -33,7 +33,7 @@ so turning it back on restores them.
   time — from Monday, › shows Tuesday, not next Monday. When
   weekends are hidden the steps skip Saturday and Sunday, so Friday
   steps to Monday; when weekends are shown they step calendar days.
-  **Today** jumps back to the next meal to pick. When the window
+  **Today** pins the week view to today. When the window
   holds a single day, the header shows that date alone ("Nov 2,
   2026"), not a range repeating it; multi-day windows show the
   range from the first shown day to the last.

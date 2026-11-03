@@ -45,7 +45,7 @@
     household can ask for just the next day even on a wide display;
     narrow displays still show fewer when the cards don't fit. Day
     cards stretch to fill the row. ‹/› step the window one shown day
-    at a time; Today returns to the next meal to pick. Every pick row in the week view and the
+    at a time; Today pins the window to today. Every pick row in the week view and the
     Today box carries its chooser (picture or generic glyph) and its
     meal label, with a divider between rows, so it is always clear
     who chose what for which meal.
@@ -1194,7 +1194,7 @@
         windowStart = nextShownDay(start);
         renderWeek();
       });
-      $('todayBtn').addEventListener('click', function () { windowStart = null; weekMonday = defaultWeekMonday(); renderWeek(); });
+      $('todayBtn').addEventListener('click', function () { windowStart = startOfDay(new Date()); weekMonday = defaultWeekMonday(); renderWeek(); });
       $('manageBtn').addEventListener('click', function () { setView(view === 'manage' ? 'week' : 'manage'); });
       $('addOptionBtn').addEventListener('click', function () { openOptionDialog(null); });
       $('foodOptionsBtn').addEventListener('click', function () { renderManage(); openDialog($('foodDialog')); });
