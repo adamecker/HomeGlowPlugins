@@ -254,7 +254,18 @@
     #choiceDialog { width: calc(100% - 1.5rem); max-width: none; }
     /* The food-options window is roomier than the pick dialogs so the
        full option list stays usable on the wall display. */
-    #foodDialog { max-width: 720px; width: calc(100% - 1rem); max-height: 85vh; overflow-y: auto; }
+    /* The food-options dialog fills the widget like the choose dialog
+       does — full content width AND height, with the option list
+       scrolling inside it. The old 720px/85vh cap left a small centered
+       panel with dimmed space around it, and rows below the fold were
+       easy to miss entirely. Header, note, Add button and Done stay
+       pinned; only the list scrolls. box-sizing is explicit so the
+       padding never pushes the dialog past the widget edge. The flex
+       layout is scoped to [open] so a closed dialog stays hidden. */
+    #foodDialog { width: calc(100% - 1.5rem); max-width: none; height: calc(100% - 1.5rem); max-height: none; box-sizing: border-box; }
+    #foodDialog[open] { display: flex; flex-direction: column; overflow: hidden; }
+    #foodDialog[open] > :not(#optionsList) { flex: none; }
+    #foodDialog[open] #optionsList { flex: 1; overflow-y: auto; min-height: 0; }
     dialog::backdrop { background: rgba(0,0,0,0.4); }
     dialog h2 { margin: 0 0 0.75rem; font-size: 1.1rem; }
     dialog label { display: block; font-weight: 600; margin: 0.6rem 0 0.25rem; }
@@ -282,16 +293,21 @@
       color: inherit; padding: 0.6rem 0.25rem; min-height: 96px; position: relative;
       display: flex; flex-direction: column; align-items: center; gap: 0.25rem;
     }
-    .optbtn.chosen { outline: 3px solid var(--accent, #4a90d9); outline-offset: 1px; }
+    /* Chosen food: its OWN border color, bolded — never a uniform accent
+       outline. The old 3px accent outline read on the wall as "red for
+       everything" (the theme accent renders reddish there), hiding which
+       border belonged to which food. Now selection is: own-color border
+       at 3px + the corner checkmark badge + the 800-weight name, while
+       an unchosen button keeps its own color at 1px with no badge. */
+    .optbtn.chosen { border-width: 3px; outline: none; }
     /* Chosen-food badge: the selection signal no option color can mimic.
-       Option buttons carry their own color as a 1px border, so an outline
-       alone reads as "another colored border" — several options are red
-       or pink (#e53935, #e57373, #f06292), very close to any outline at
-       wall distance. The badge is a monochrome check in the corner (dark
-       on light, light on dark): its SHAPE and glyph, not its hue, carry
-       the meaning, so it stays unmistakable against every option color,
-       in both themes, and while pressed (it is a child of the button, so
-       the pressed brightness/scale applies to badge and button together). */
+       Option buttons carry their own color as a border (1px unchosen,
+       3px chosen — see .optbtn.chosen), so the badge is a monochrome
+       check in the corner (dark on light, light on dark): its SHAPE and
+       glyph, not its hue, carry the meaning, so it stays unmistakable
+       against every option color, in both themes, and while pressed (it
+       is a child of the button, so the pressed brightness/scale applies
+       to badge and button together). */
     .optbtn .chosenbadge {
       position: absolute; top: 6px; right: 6px; width: 30px; height: 30px;
       border-radius: 50%; background: #1a1a1a; color: #fff; border: 2px solid #fff;
@@ -953,7 +969,15 @@
       if (!state.options.length) {
         ol.innerHTML = '<p class="hint">No options yet. Add the meals parents pack.</p>';
       } else {
-        ol.innerHTML = state.options.map(function (o) {
+        // Food options render alphabetically (locale-aware,
+        // case-insensitive, by name text) — display order only. The
+        // stored options array keeps its own order, so rendering never
+        // reorders the doc. Edit/Delete stay id-based, so sorting
+        // cannot misroute them.
+        var sortedOptions = state.options.slice().sort(function (a, b) {
+          return (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
+        });
+        ol.innerHTML = sortedOptions.map(function (o) {
           var mealNames = mealsOf(o).map(function (id) { return mealLabel(id); }).join(' + ');
           var thumb = (o.imageUrl && validImageUrl(o.imageUrl)) ?
             '<img class="thumb" src="' + esc(o.imageUrl) + '" alt="" onerror="this.style.display=\'none\'">' : '';
