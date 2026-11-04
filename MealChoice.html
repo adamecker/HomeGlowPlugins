@@ -279,10 +279,31 @@
     #choiceDialog .optgrid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
     .optbtn {
       border: 1px solid var(--border, #ccc); border-radius: 14px; background: transparent;
-      color: inherit; padding: 0.6rem 0.25rem; min-height: 96px;
+      color: inherit; padding: 0.6rem 0.25rem; min-height: 96px; position: relative;
       display: flex; flex-direction: column; align-items: center; gap: 0.25rem;
     }
     .optbtn.chosen { outline: 3px solid var(--accent, #4a90d9); outline-offset: 1px; }
+    /* Chosen-food badge: the selection signal no option color can mimic.
+       Option buttons carry their own color as a 1px border, so an outline
+       alone reads as "another colored border" — several options are red
+       or pink (#e53935, #e57373, #f06292), very close to any outline at
+       wall distance. The badge is a monochrome check in the corner (dark
+       on light, light on dark): its SHAPE and glyph, not its hue, carry
+       the meaning, so it stays unmistakable against every option color,
+       in both themes, and while pressed (it is a child of the button, so
+       the pressed brightness/scale applies to badge and button together). */
+    .optbtn .chosenbadge {
+      position: absolute; top: 6px; right: 6px; width: 30px; height: 30px;
+      border-radius: 50%; background: #1a1a1a; color: #fff; border: 2px solid #fff;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.45); z-index: 2;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 19px; font-weight: 800; line-height: 1;
+    }
+    [data-theme="dark"] .optbtn .chosenbadge {
+      background: #fff; color: #1a1a1a; border-color: #1a1a1a;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.7);
+    }
+    .optbtn.chosen .nm { font-weight: 800; }
     .optbtn .em { font-size: 2.2rem; line-height: 1; }
     .optbtn .otimg { width: 56px; height: 56px; object-fit: cover; border-radius: 10px; }
     .optbtn .nm { font-size: 0.85rem; font-weight: 600; text-align: center; overflow-wrap: anywhere; }
@@ -863,10 +884,10 @@
         // with that person's meal subgroups nested under it. Each
         // subgroup keeps its meal label; dividers separate people and meals.
         visiblePeople().forEach(function (p) {
-          html += '<div class="persongroup"><div class="personhead">' + personLabel(p) + '</div>';
+          html += '<div class="persongroup" data-person="' + esc(p.id) + '"><div class="personhead">' + personLabel(p) + '</div>';
           enabledMealDefs().forEach(function (m) {
             var picked = choicesForMeal(key, p.id, m.id).map(function (id) { return optionById(id); }).filter(function (o) { return !!o; });
-            html += '<div class="mealsub">';
+            html += '<div class="mealsub" data-person="' + esc(p.id) + '" data-meal="' + m.id + '">';
             html += '<span class="meallabel">' + m.emoji + ' ' + esc(m.label) + '</span>';
             html += (picked.length ? '<span class="pickstack">' + picked.map(function (o) { return '<span class="pick">' + optionVisual(o, 'em') + ' ' + esc(o.name) + '</span>'; }).join('') + '</span>' :
               '<span class="none">—</span>') + '</div>';
@@ -880,7 +901,23 @@
       var cards = grid.querySelectorAll('.daycard[data-date]');
       for (var j = 0; j < cards.length; j++) {
         (function (card) {
-          card.addEventListener('click', function () { openChoiceDialog(card.getAttribute('data-date')); });
+          card.addEventListener('click', function (e) {
+            // Tap scoping: a tap on a person's name/header or on one of
+            // their meal rows opens the dialog for THAT person (and that
+            // meal for a meal-row tap); a tap anywhere else on the card
+            // keeps the old default (first person still to choose).
+            var t = e.target;
+            var personId = null;
+            var mealId = null;
+            while (t && t !== card) {
+              if (t.getAttribute) {
+                if (!mealId) mealId = t.getAttribute('data-meal');
+                if (!personId) personId = t.getAttribute('data-person');
+              }
+              t = t.parentNode;
+            }
+            openChoiceDialog(card.getAttribute('data-date'), personId, mealId);
+          });
         })(cards[j]);
       }
     }
@@ -1060,14 +1097,23 @@
         el.appendChild(b);
       });
     }
-    function openChoiceDialog(key) {
+    // key: day; personId/mealId: optional tap scope (person 'u<id>' string
+    // from the day card, meal id from a meal row). A scoped tap wins over
+    // the default (first enabled meal, first person still to choose);
+    // an unknown person or a disabled meal falls back to the default.
+    function openChoiceDialog(key, personId, mealId) {
       if (!visiblePeople().length || !state.options.length) { setView('manage'); return; }
       dialogDateKey = key;
-      dialogMeal = (enabledMealDefs()[0] || { id: 'lunch' }).id;
+      dialogMeal = (mealId && isMealEnabled(mealId)) ? mealId : (enabledMealDefs()[0] || { id: 'lunch' }).id;
       var vis = visiblePeople();
-      var withChoice = vis.filter(function (p) { return choicesForMeal(key, p.id, dialogMeal).length > 0; });
-      var without = vis.filter(function (p) { return choicesForMeal(key, p.id, dialogMeal).length === 0; });
-      dialogPersonId = (without[0] || vis[0]).id;
+      var scoped = personId ? personById(personId) : null;
+      if (scoped) {
+        dialogPersonId = scoped.id;
+      } else {
+        var withChoice = vis.filter(function (p) { return choicesForMeal(key, p.id, dialogMeal).length > 0; });
+        var without = vis.filter(function (p) { return choicesForMeal(key, p.id, dialogMeal).length === 0; });
+        dialogPersonId = (without[0] || vis[0]).id;
+      }
       renderChoiceDialog();
       openDialog($('choiceDialog'));
     }
@@ -1093,7 +1139,7 @@
       var d = new Date();
       var parts = key.split('-');
       d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
-      $('choiceTitle').textContent = 'Choose ' + mealLabel(dialogMeal) + ' — ' + fmtDay(d);
+      $('choiceTitle').textContent = 'Choose ' + mealLabel(dialogMeal) + (personById(dialogPersonId) ? ' for ' + personById(dialogPersonId).name : '') + ' — ' + fmtDay(d);
       var peopleEl = $('choicePeople');
       peopleEl.innerHTML = '';
       visiblePeople().forEach(function (p) {
@@ -1117,9 +1163,12 @@
       mealOptions.forEach(function (o) {
         var b = document.createElement('button');
         b.type = 'button';
-        b.className = 'optbtn' + (choicesForMeal(key, dialogPersonId, dialogMeal).indexOf(o.id) !== -1 ? ' chosen' : '');
+        var isChosen = choicesForMeal(key, dialogPersonId, dialogMeal).indexOf(o.id) !== -1;
+        b.className = 'optbtn' + (isChosen ? ' chosen' : '');
+        b.setAttribute('aria-pressed', isChosen ? 'true' : 'false');
         b.style.borderColor = o.color || '';
-        b.innerHTML = optionVisual(o, 'otimg') + '<span class="nm">' + esc(o.name) + '</span>';
+        b.innerHTML = optionVisual(o, 'otimg') + '<span class="nm">' + esc(o.name) + '</span>' +
+          (isChosen ? '<span class="chosenbadge" aria-hidden="true">✓</span>' : '');
         // Multi-toggle: tap adds or removes this option from the
         // person's set for this meal/day. No auto-advance — the
         // person stays selected so several taps accumulate, and Done
