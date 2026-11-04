@@ -297,12 +297,13 @@
        outline. The old 3px accent outline read on the wall as "red for
        everything" (the theme accent renders reddish there), hiding which
        border belonged to which food. Now selection is: own-color border
-       at 3px + the corner checkmark badge + the 800-weight name, while
-       an unchosen button keeps its own color at 1px with no badge. */
-    .optbtn.chosen { border-width: 3px; outline: none; }
+       at 5px + an own-color translucent background tint + the corner
+       checkmark badge + the 800-weight name, while an unchosen button
+       keeps its own color at 1px, default background, no badge. */
+    .optbtn.chosen { border-width: 5px; outline: none; }
     /* Chosen-food badge: the selection signal no option color can mimic.
        Option buttons carry their own color as a border (1px unchosen,
-       3px chosen — see .optbtn.chosen), so the badge is a monochrome
+       5px chosen — see .optbtn.chosen), so the badge is a monochrome
        check in the corner (dark on light, light on dark): its SHAPE and
        glyph, not its hue, carry the meaning, so it stays unmistakable
        against every option color, in both themes, and while pressed (it
@@ -507,6 +508,21 @@
       return String(s == null ? '' : s).replace(/[&<>\"']/g, function (c) {
         return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
       });
+    }
+    /* Own-color tint for a CHOSEN food button: the option's hex color at
+       a translucent alpha, so the background wash tracks the food's own
+       color instead of imposing one uniform highlight. Unparseable
+       colors return '' (no tint) rather than guessing. Dark theme gets
+       a stronger alpha because the same wash reads fainter over a dark
+       background; light theme stays softer so the wash never competes
+       with the name, picture, or badge. */
+    function hexToRgba(hex, alpha) {
+      if (typeof hex !== 'string') return '';
+      var h = hex.replace(/^#/, '');
+      if (h.length === 3) h = h.split('').map(function (c) { return c + c; }).join('');
+      if (!/^[0-9a-fA-F]{6}$/.test(h)) return '';
+      var r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+      return 'rgba(' + r + ', ' + g + ', ' + b + ', ' + alpha + ')';
     }
     function $(id) { return document.getElementById(id); }
     function startOfDay(d) { var x = new Date(d.getTime()); x.setHours(0, 0, 0, 0); return x; }
@@ -1191,6 +1207,11 @@
         b.className = 'optbtn' + (isChosen ? ' chosen' : '');
         b.setAttribute('aria-pressed', isChosen ? 'true' : 'false');
         b.style.borderColor = o.color || '';
+        /* Chosen tint: the option's own color as a translucent wash
+           (stronger on dark, softer on light — see hexToRgba). Unchosen
+           buttons keep the default transparent background. */
+        var tintAlpha = document.documentElement.getAttribute('data-theme') === 'dark' ? 0.30 : 0.22;
+        b.style.backgroundColor = isChosen ? hexToRgba(o.color, tintAlpha) : '';
         b.innerHTML = optionVisual(o, 'otimg') + '<span class="nm">' + esc(o.name) + '</span>' +
           (isChosen ? '<span class="chosenbadge" aria-hidden="true">✓</span>' : '');
         // Multi-toggle: tap adds or removes this option from the
